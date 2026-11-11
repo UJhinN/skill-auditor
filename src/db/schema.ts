@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -9,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 // relative import: drizzle-kit loads this file without the @/ alias
 import { SEVERITIES } from "../lib/scanner/types";
+import type { CoverageEntry } from "../lib/github";
 
 export const scanStatus = pgEnum("scan_status", [
   "pending",
@@ -31,6 +33,10 @@ export const scans = pgTable(
     step: text("step"), // human-readable progress while running
     score: integer("score"), // 0–100, set when done
     error: text("error"), // set when failed
+    // which files were read fully / partially / skipped — always shown in the report
+    coverage: jsonb("coverage").$type<CoverageEntry[]>(),
+    // results are only reused for the same commit AND the same rules
+    scannerVersion: text("scanner_version"),
     // no auth yet; kept nullable so adding login later needs no migration of old rows
     userId: text("user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -16,8 +16,9 @@ export default function Home() {
 
       <RepoForm />
 
-      <p className="text-sm text-muted-foreground">
-        ยังอยู่ระหว่างพัฒนา ตัวสแกนจะเปิดใช้เร็วๆ นี้
+      <p className="text-sm leading-6 text-muted-foreground">
+        ตอนนี้ตรวจด้วยชุดกฎที่หารูปแบบที่รู้จักเท่านั้น ยังไม่มี AI อ่านความหมายของเนื้อหา
+        ผลที่ไม่พบปัญหาจึงไม่ได้รับรองว่า skill นั้นปลอดภัย
       </p>
     </main>
   );

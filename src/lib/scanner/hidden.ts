@@ -7,15 +7,31 @@ const ZERO_WIDTH = /[​-‏⁠-⁤﻿­]/g;
 const BIDI = /[‪-‮⁦-⁩]/;
 const TAGS = /[\u{E0000}-\u{E007F}]+/gu;
 
+// Legitimate uses of invisible characters, removed before checking:
+// - subdivision flags (England, Scotland, Wales) are 🏴 + tag letters + cancel tag
+const TAG_FLAG = /\u{1F3F4}[\u{E0061}-\u{E007A}]{2,8}\u{E007F}/gu;
+// - ZWJ between emoji builds one glyph (👨‍👩‍👧, 🏳️‍🌈)
+const EMOJI_ZWJ = /(\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}️]?)‍(?=\p{Extended_Pictographic})/gu;
+// - ZWJ/ZWNJ are part of normal spelling in Arabic-script and Indic languages
+const SCRIPT_JOINER =
+  /([\p{Script=Arabic}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]\p{M}*)[‌‍]/gu;
+
+function withoutLegitInvisibles(s: string): string {
+  return s.replace(TAG_FLAG, "").replace(EMOJI_ZWJ, "$1").replace(SCRIPT_JOINER, "$1");
+}
+
 // Phrases that try to override the agent's instructions or hide actions from the user.
 // Every gap is bounded ({0,N}) and excludes newlines so matching stays linear-ish.
 export const OVERRIDE_PATTERNS: RegExp[] = [
   /\b(ignore|disregard|forget|override|bypass)\b[^\n.]{0,40}\b(previous|prior|above|earlier|all|any|system|original)\b[^\n.]{0,25}\b(instructions?|prompts?|rules?|guidelines?|directives?)\b/i,
-  /\b(do not|don't|dont|never)\b[^\n.]{0,30}\b(tell|inform|mention|reveal|show|notify|alert|ask)\b[^\n.]{0,20}\bthe user\b/i,
+  /\b(do not|don't|dont|never)\b[^\n.]{0,30}\b(tell|inform|mention|reveal|show|notify|alert)\b[^\n.]{0,20}\bthe user\b/i,
+  // "don't ask the user for a key" is fine; skipping permission/confirmation is not
+  /\b(do not|don't|dont|never|no need to)\b[^\n.]{0,30}\b(ask|request|wait)\b[^\n.]{0,25}\b(permission|confirmation|approval|consent)\b/i,
   /\bwithout\b[^\n.]{0,20}\b(asking|telling|informing|notifying|alerting|confirming with)\b[^\n.]{0,15}\bthe user\b/i,
   /\b(new|updated|real) system prompt\b/i,
   /\byou are (now|no longer)\b[^\n.]{0,40}\b(unrestricted|jailbroken|developer mode|dan)\b/i,
-  /(ไม่ต้อง|ห้าม|อย่า)\s*(บอก|แจ้ง|ถาม|เตือน)\s*(ให้)?\s*ผู้ใช้/,
+  /(ไม่ต้อง|ห้าม|อย่า)\s*(บอก|แจ้ง|เตือน)\s*(ให้)?\s*ผู้ใช้/,
+  /(ไม่ต้อง|ห้าม|อย่า)\s*(ขอ|รอ)\s*(การ)?\s*(อนุญาต|ยืนยัน|อนุมัติ)/,
   /(เพิกเฉย|ไม่ต้องสนใจ|ลืม|ข้าม)\s*(ต่อ)?\s*คำสั่ง\s*(ก่อนหน้า|เดิม|ทั้งหมด|ข้างบน)/,
 ];
 
@@ -44,9 +60,10 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
   lines.forEach((raw, i) => {
     const line = raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) : raw;
     const lineNo = i + 1;
+    const clean = withoutLegitInvisibles(raw);
 
     // Unicode tag characters: invisible ASCII smuggled into the text.
-    const tags = raw.match(TAGS);
+    const tags = clean.match(TAGS);
     if (tags) {
       const decoded = decodeTags(tags.join(""));
       out.push({
@@ -55,7 +72,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
         file: path,
         line: lineNo,
         message: `มีข้อความซ่อนด้วย Unicode tag ที่มองไม่เห็น ถอดได้ว่า: "${decoded.slice(0, 120)}"`,
-        excerpt: excerpt(raw, raw.search(TAGS)),
+        excerpt: excerpt(clean, clean.search(TAGS)),
       });
     }
 
@@ -72,7 +89,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
     }
 
     // Zero-width characters (a BOM at the very start of the file is normal).
-    const scan = i === 0 && raw.startsWith("﻿") ? raw.slice(1) : raw;
+    const scan = i === 0 && clean.startsWith("﻿") ? clean.slice(1) : clean;
     const zw = scan.match(ZERO_WIDTH);
     if (zw) {
       const many = zw.length >= 3;

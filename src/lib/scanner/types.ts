@@ -8,6 +8,8 @@ export interface SkillFile {
   /** Path inside the repo, forward slashes, e.g. "skills/foo/SKILL.md" */
   path: string;
   content: string;
+  /** Real size in bytes when `content` is only the start of a larger file */
+  totalBytes?: number;
 }
 
 export interface Finding {
@@ -25,6 +27,8 @@ export interface Finding {
 
 export interface ScanResult {
   findings: Finding[];
+  /** Highest severity found; "none_found" never means "safe", only "no known pattern" */
+  riskLevel: Severity | "none_found";
   /** 0–100, higher is safer */
   score: number;
   filesScanned: number;

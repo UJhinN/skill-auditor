@@ -7,6 +7,9 @@ import { fileKind, SEVERITY_RANK } from "./util";
 export type { Finding, ScanResult, Severity, SkillFile } from "./types";
 export { SEVERITIES } from "./types";
 
+/** Bump when rules change, so cached results from older rules aren't reused. */
+export const SCANNER_VERSION = "0.2.1";
+
 /** Max findings kept per (file, rule); the rest are summarized on the last one kept. */
 export const MAX_PER_RULE = 10;
 
@@ -20,6 +23,17 @@ export function scanFiles(files: SkillFile[]): ScanResult {
     const kind = fileKind(f.path);
     all.push(...scanHidden(f.path, f.content, kind));
     all.push(...scanScripts(f.path, f.content, kind));
+
+    // Padding a file until scanners give up is a known evasion trick.
+    if (f.totalBytes !== undefined && f.totalBytes > f.content.length) {
+      all.push({
+        severity: "medium",
+        rule: "hidden.oversized-file",
+        file: f.path,
+        line: null,
+        message: `ไฟล์ใหญ่ผิดปกติ (${(f.totalBytes / 1_000_000).toFixed(1)} MB) จึงสแกนได้แค่ส่วนต้น ส่วนที่เหลือยังไม่ได้ตรวจ`,
+      });
+    }
   }
 
   all = capPerRule(all);
@@ -30,7 +44,12 @@ export function scanFiles(files: SkillFile[]): ScanResult {
       (a.line ?? 0) - (b.line ?? 0),
   );
 
-  return { findings: all, score: computeScore(all), filesScanned };
+  return {
+    findings: all,
+    riskLevel: all.length > 0 ? all[0].severity : "none_found", // sorted most severe first
+    score: computeScore(all),
+    filesScanned,
+  };
 }
 
 function capPerRule(findings: Finding[]): Finding[] {
