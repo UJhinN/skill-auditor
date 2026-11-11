@@ -3,6 +3,7 @@
 // Nothing fetched here is ever executed.
 
 import type { SkillFile } from "./scanner";
+import { fileKind } from "./scanner/util";
 
 const API = "https://api.github.com";
 const RAW = "https://raw.githubusercontent.com";
@@ -12,7 +13,10 @@ const RAW = "https://raw.githubusercontent.com";
 export const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
 
 export const LIMITS = {
-  maxFiles: 200,
+  // 200 → 400 after the per-skill split: measured on real repos, 100 extra files cost only
+  // ~0.3–0.7s (the fixed cost is GitHub listing a repo's files, ~7s when not cached), and 400
+  // lets repos with a few hundred files be read in full instead of warning "incomplete".
+  maxFiles: 400,
   maxFileBytes: 1_000_000,
   /** How much of an oversized file we still read: its start and its end */
   partialBytes: 256 * 1024,
@@ -158,8 +162,41 @@ function isSkillMd(path: string): boolean {
 const SCRIPT_DIRS = /(^|\/)(scripts?|bin|tools)\//i;
 
 /**
+ * How early a file should be read. What matters is what the file is, not which folder it
+ * sits in: a schema under scripts/ is data, a .py under references/ is still code.
+ *   0  SKILL.md — the instructions the agent follows
+ *   1  code that can run (scripts, or extensionless files in script folders)
+ *   2  text the agent may read (markdown, txt, html)
+ *   3  everything else (json, xml, xsd, csv, …): rarely carries instructions, often huge
+ */
+export function readRank(path: string): 0 | 1 | 2 | 3 {
+  if (isSkillMd(path)) return 0;
+  const kind = fileKind(path);
+  if (kind === "script") return 1;
+  if (kind === "markdown" || kind === "html") return 2;
+  if (ext(path) === "" && SCRIPT_DIRS.test(path)) return 1;
+  return 3;
+}
+
+/** The skill folder a file belongs to: the deepest one containing it, or "" for a root skill. */
+function ownerOf(path: string, skillDirs: Set<string>): string | null {
+  let d = dirname(path);
+  while (true) {
+    if (skillDirs.has(d)) return d;
+    if (d === "") return null;
+    d = dirname(d);
+  }
+}
+
+/**
  * Pure: decide which files belong to the skill(s) and in what order to read them.
  * A skill is the folder holding a SKILL.md; a root SKILL.md makes the whole repo the skill.
+ *
+ * The limits are for the whole repo, but they are shared out fairly: files are read by
+ * importance (SKILL.md, then code, then text, then data) and, within each level, skills
+ * take turns. A repo with many skills therefore gets every skill's SKILL.md and scripts
+ * read before any skill's reference files, instead of the first skills in alphabetical
+ * order using up the allowance.
  */
 export function planFiles(entries: TreeEntry[]): {
   skillDirs: string[];
@@ -171,32 +208,55 @@ export function planFiles(entries: TreeEntry[]): {
   if (skillDirs.length === 0) {
     throw new GitHubError("ไม่พบไฟล์ SKILL.md ใน repo นี้ จึงไม่ใช่ skill ที่สแกนได้", 400);
   }
+  const dirSet = new Set(skillDirs);
+  const skillIndex = new Map(skillDirs.map((d, i) => [d, i]));
 
-  const inScope = skillDirs.includes("")
-    ? blobs
-    : blobs.filter((b) => skillDirs.some((d) => b.path.startsWith(d + "/")));
-
-  // SKILL.md first, then scripts, then everything else (smallest first).
-  const rank = (p: string) => (isSkillMd(p) ? 0 : SCRIPT_DIRS.test(p) ? 1 : 2);
-  const ordered = [...inScope].sort(
-    (a, b) => rank(a.path) - rank(b.path) || (a.size ?? 0) - (b.size ?? 0) || a.path.localeCompare(b.path),
-  );
-
-  const toFetch: { path: string; size: number }[] = [];
+  interface Item {
+    path: string;
+    size: number;
+    rank: number;
+    ordinal: number;
+    skill: number;
+  }
   const skipped: CoverageEntry[] = [];
-  let budget = LIMITS.maxTotalBytes;
+  const groups = new Map<string, Item[]>(); // one list per (skill, rank), smallest file first
 
-  for (const b of ordered) {
-    const size = b.size ?? 0;
+  for (const b of blobs) {
+    const owner = ownerOf(b.path, dirSet);
+    if (owner === null) continue; // not part of any skill
     if (BINARY_EXT.has(ext(b.path))) {
       skipped.push({ path: b.path, status: "skipped", reason: "ไฟล์ binary อ่านเป็นข้อความไม่ได้" });
-    } else if (toFetch.length >= LIMITS.maxFiles) {
-      skipped.push({ path: b.path, status: "skipped", reason: `เกินจำนวนไฟล์สูงสุด ${LIMITS.maxFiles} ไฟล์` });
+      continue;
+    }
+    const rank = readRank(b.path);
+    const key = `${owner}\u0000${rank}`;
+    const item: Item = { path: b.path, size: b.size ?? 0, rank, ordinal: 0, skill: skillIndex.get(owner)! };
+    const g = groups.get(key);
+    if (g) g.push(item);
+    else groups.set(key, [item]);
+  }
+
+  const items: Item[] = [];
+  for (const g of groups.values()) {
+    g.sort((a, b) => a.size - b.size || a.path.localeCompare(b.path));
+    g.forEach((it, i) => {
+      it.ordinal = i; // this skill's 1st, 2nd, 3rd … file of this level
+      items.push(it);
+    });
+  }
+  // by importance, then by turn (every skill's 1st file before any skill's 2nd), then skill order
+  items.sort((a, b) => a.rank - b.rank || a.ordinal - b.ordinal || a.skill - b.skill || a.path.localeCompare(b.path));
+
+  const toFetch: { path: string; size: number }[] = [];
+  let budget = LIMITS.maxTotalBytes;
+  for (const it of items) {
+    if (toFetch.length >= LIMITS.maxFiles) {
+      skipped.push({ path: it.path, status: "skipped", reason: `เกินจำนวนไฟล์สูงสุด ${LIMITS.maxFiles} ไฟล์` });
     } else if (budget <= 0) {
-      skipped.push({ path: b.path, status: "skipped", reason: "เกินขนาดรวมสูงสุด 5 MB" });
+      skipped.push({ path: it.path, status: "skipped", reason: "เกินขนาดรวมสูงสุด 5 MB" });
     } else {
-      toFetch.push({ path: b.path, size });
-      budget -= size > LIMITS.maxFileBytes ? LIMITS.partialBytes + LIMITS.tailBytes : size;
+      toFetch.push({ path: it.path, size: it.size });
+      budget -= it.size > LIMITS.maxFileBytes ? LIMITS.partialBytes + LIMITS.tailBytes : it.size;
     }
   }
   return { skillDirs, toFetch, skipped };
