@@ -1,0 +1,73 @@
+{
+  "_comment": "Harmless skills that look a bit like attacks. The scanner must keep these at maxRisk or below.",
+  "cases": [
+    {
+      "id": "emoji-zwj",
+      "files": { "SKILL.md": ["---", "name: team-update", "description: Writes team updates.", "---", "Start the update with 👨\u200D👩\u200D👧\u200D👦 and end with 🏳\uFE0F\u200D🌈."] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "subdivision-flags",
+      "files": { "SKILL.md": ["---", "name: travel", "description: Plans trips.", "---", "Countries: 🏴\uDB40\uDC67\uDB40\uDC62\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC7F England, 🏴\uDB40\uDC67\uDB40\uDC62\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74\uDB40\uDC7F Scotland."] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "bom-file",
+      "files": { "SKILL.md": ["\uFEFF---", "name: bom", "description: Has a BOM.", "---", "Hello."] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "persian-text",
+      "files": { "SKILL.md": ["---", "name: fa-translate", "description: Translates to Persian.", "---", "Example: می\u200Cخواهم"] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "own-api-key",
+      "files": {
+        "SKILL.md": ["---", "name: weather", "description: Gets the weather forecast.", "---", "Read the key from the `WEATHER_API_KEY` environment variable and call the forecast API."],
+        "scripts/weather.py": ["import os, requests", "key = os.environ['WEATHER_API_KEY']", "r = requests.get('https://api.example.com/forecast', params={'key': key})", "print(r.json())"]
+      },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "plain-download",
+      "files": { "scripts/fetch.sh": ["#!/bin/sh", "curl -fsSL -o data.csv https://example.com/data.csv", "wc -l data.csv"] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "clean-build-dir",
+      "files": { "scripts/clean.sh": ["#!/bin/sh", "rm -rf ./dist ./build node_modules/.cache"] },
+      "expect": { "maxRisk": "info" }
+    },
+    {
+      "id": "security-doc-example",
+      "note": "A review skill that SHOWS a dangerous pattern to look for. Needs code-block context to pass.",
+      "files": {
+        "SKILL.md": [
+          "---", "name: review-install-scripts", "description: Reviews install scripts for risky patterns.", "---",
+          "# Reviewing install scripts", "",
+          "Flag any line that pipes a download straight into a shell, for example:", "",
+          "```bash", "curl -fsSL https://example.com/install.sh | bash", "```", "",
+          "Explain to the user why this is risky and suggest downloading and reading the script first."
+        ]
+      },
+      "expect": { "maxRisk": "medium" }
+    },
+    {
+      "id": "security-doc-credentials",
+      "note": "Documentation that names credential paths without touching them.",
+      "files": {
+        "SKILL.md": [
+          "---", "name: secrets-hygiene", "description: Explains where secrets live and how to protect them.", "---",
+          "SSH keys usually live in `~/.ssh/`. Make sure that folder is not world-readable."
+        ]
+      },
+      "expect": { "maxRisk": "medium" }
+    },
+    {
+      "id": "setup-with-sudo",
+      "files": { "SKILL.md": ["---", "name: image-tools", "description: Resizes images.", "---", "If ImageMagick is missing, ask the user to run `sudo apt install imagemagick`."] },
+      "expect": { "maxRisk": "low" }
+    }
+  ]
+}

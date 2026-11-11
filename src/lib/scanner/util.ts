@@ -8,12 +8,51 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
-/** Regexes only ever see this many characters of a line (keeps scans fast on minified files). */
-export const MAX_LINE = 4000;
+/**
+ * Long lines are scanned in overlapping windows so a payload hidden deep in a
+ * minified or padded line is still seen, while each regex only runs on a bounded chunk.
+ */
+const WINDOW = 4000;
+const OVERLAP = 400;
 
-export type FileKind = "markdown" | "script" | "other";
+export function windows(line: string): { text: string; offset: number }[] {
+  if (line.length <= WINDOW) return [{ text: line, offset: 0 }];
+  const out: { text: string; offset: number }[] = [];
+  for (let start = 0; ; start += WINDOW - OVERLAP) {
+    out.push({ text: line.slice(start, start + WINDOW), offset: start });
+    if (start + WINDOW >= line.length) break;
+  }
+  return out;
+}
 
-const MARKDOWN_EXT = new Set(["md", "mdx", "markdown", "txt", "html", "htm"]);
+/** First match of `re` anywhere in `line`, with its index in the full line. */
+export function findIn(line: string, re: RegExp): { index: number; match: string } | null {
+  for (const w of windows(line)) {
+    const m = re.exec(w.text);
+    if (m) return { index: w.offset + m.index, match: m[0] };
+  }
+  return null;
+}
+
+/**
+ * Is position `at` inside a quotation or inline code on this line?
+ * Quoted phrases are usually examples being discussed, not instructions.
+ */
+export function isQuoted(line: string, at: number): boolean {
+  const before = line.slice(0, at);
+  const count = (re: RegExp) => (before.match(re) ?? []).length;
+  return (
+    count(/"/g) % 2 === 1 ||
+    count(/`/g) % 2 === 1 ||
+    count(/“/g) > count(/”/g) ||
+    count(/«/g) > count(/»/g)
+  );
+}
+
+export type FileKind = "markdown" | "html" | "script" | "other";
+
+const MARKDOWN_EXT = new Set(["md", "mdx", "markdown", "txt"]);
+const HTML_EXT = new Set(["html", "htm"]);
 const SCRIPT_EXT = new Set([
   "sh", "bash", "zsh", "fish", "ksh",
   "ps1", "psm1", "bat", "cmd",
@@ -26,6 +65,7 @@ export function fileKind(path: string): FileKind {
   if (dot <= 0) return "other";
   const ext = name.slice(dot + 1).toLowerCase();
   if (MARKDOWN_EXT.has(ext)) return "markdown";
+  if (HTML_EXT.has(ext)) return "html";
   if (SCRIPT_EXT.has(ext)) return "script";
   return "other";
 }
@@ -43,7 +83,7 @@ export function isScriptComment(line: string): boolean {
 
 // Zero-width, bidi controls, BOM, soft hyphen, and Unicode tag characters.
 const INVISIBLE_ANY =
-  /[​-‏⁠-⁤‪-‮⁦-⁩﻿­]|[\u{E0000}-\u{E007F}]/gu;
+  /[\u200B-\u200F\u2060-\u2064\u202A-\u202E\u2066-\u2069\uFEFF\u00AD]|[\u{E0000}-\u{E007F}]/gu;
 
 /** Replace invisible characters with a visible ⟦U+XXXX⟧ marker. */
 export function reveal(text: string): string {

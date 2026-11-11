@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Skill Auditor
 
-## Getting Started
+เว็บสำหรับตรวจ AI agent skill บน GitHub ก่อนติดตั้ง ระบบจะอ่านไฟล์ของ skill แล้วหาข้อความที่ซ่อนไว้และคำสั่งที่เสี่ยง
+โดยวิเคราะห์จากการอ่านอย่างเดียว ไม่มีการรันโค้ดใดๆ
 
-First, run the development server:
+**เว็บ:** https://skill-auditor-phi.vercel.app
+
+## ตรวจอะไรได้บ้าง
+
+- **ข้อความที่ซ่อน**
+  - Unicode tag ที่มองไม่เห็น (ระบบถอดออกมาให้อ่าน)
+  - อักขระความกว้างศูนย์ และอักขระสลับทิศทาง (bidi)
+  - HTML comment และ CSS ที่ซ่อนข้อความ
+  - ข้อมูลเข้ารหัสก้อนยาว
+  - ไฟล์ที่ถมให้ใหญ่ผิดปกติ
+- **คำสั่งต่อ AI**
+  - ประโยคที่สั่งให้ทิ้งคำสั่งเดิม
+  - ประโยคที่สั่งให้ปิดบังผู้ใช้
+  - ประโยคที่สั่งให้ข้ามการยืนยันจากผู้ใช้
+- **คำสั่งเสี่ยงในสคริปต์และใน SKILL.md**
+  - ดาวน์โหลดแล้วรันทันที, รันโค้ดที่เข้ารหัสไว้
+  - แตะไฟล์รหัสผ่านหรือ key, ส่งข้อมูลออก
+  - reverse shell, ฝังตัวให้รันเอง, ลบข้อมูลวงกว้าง, ปิดระบบป้องกัน, ขอสิทธิ์ admin
+
+ผลที่ดีที่สุดที่ระบบจะรายงานคือ "ไม่พบปัญหาที่รู้จัก" ระบบจะ**ไม่**บอกว่าปลอดภัย และทุกรายงานบอกว่าอ่านไฟล์ไหนไปแล้ว ไฟล์ไหนข้ามไป
+
+## ผลการวัด (`npm run eval`)
+
+วัดเมื่อ 2026-11-11 ด้วยตัวสแกนเวอร์ชัน 0.3.0 ใช้กฎอย่างเดียว ยังไม่มี LLM
+
+| เกณฑ์ | จับได้ (เคสที่กฎควรจับ) | จับได้ (รวมจุดบอดที่รู้แล้ว) | เตือนผิด: skill จริง | เตือนผิด: เคสหลอก | Precision |
+|---|---|---|---|---|---|
+| medium ขึ้นไป | 23/24 (96%) | 24/34 (71%) | 1/49 (2%) | 2/10 | 89% |
+| high ขึ้นไป | 19/24 (79%) | 19/34 (56%) | 0/49 (0%) | 1/10 | 95% |
+
+**ชุดทดสอบ** อยู่ใน [`fixtures/eval/`](fixtures/eval/)
+- **skill จริง 75 ตัว** จาก 7 repo ยอดนิยม ล็อกไว้ที่ commit ที่ระบุ และดึงมาตอนรัน eval (ไม่ได้คัดลอกเข้ามาใน repo นี้)
+  - ทั่วไป 49 ตัว: anthropics/skills, vercel-labs/agent-skills, addyosmani/agent-skills, coreyhaines31/marketingskills
+  - สาย security 26 ตัว: trailofbits/skills, mukul975/Anthropic-Cybersecurity-Skills, SnailSploit/Claude-Red
+- **เคสอันตรายที่เขียนเอง 24 เคส** อย่างน้อย 1 เคสต่อกฎ รวมเคสที่โจมตีตัวสแกนเอง
+- **จุดบอดที่รู้แล้ว 10 เคส** และ**เคสหลอก 10 เคส** ที่ต้องไม่ถูกเตือน
+
+**อ่านตัวเลขอย่างระวัง**
+- เคสอันตรายเขียนโดยคนเดียวกับที่เขียนกฎ ตัวเลข "เคสที่กฎควรจับ" จึงดีเกินจริงแน่นอน ตัวเลขที่สะท้อนความจริงกว่าคือคอลัมน์ "รวมจุดบอด"
+- เคสอันตรายทั้งหมดเป็นของที่เราเขียนขึ้นเอง ไม่ใช่ malware จริงที่เจอในโลกจริง
+- skill สาย security ถูกเตือนบ่อย (medium+ 7/26, high+ 4/26) เพราะหน้าที่ของมันต้องแตะของอันตรายอยู่แล้ว ตัวเลขนี้แยกรายงานไว้ ไม่ได้นับเป็นการเตือนผิด
+- เกณฑ์อ้างอิงจากงานที่ตีพิมพ์: pipeline กฎ + LLM ของ Liu et al. (arXiv 2601.10338) ได้ precision 86.7% / recall 82.5%, ส่วน skill-scanner ของ Cisco ที่ใช้กฎอย่างเดียวจับได้ 7.7% ที่ระดับ HIGH ใช้เพื่อเทียบภาพเท่านั้น เพราะชุดทดสอบต่างกัน
+
+**จุดบอดที่รู้แล้ว** (ดู [`fixtures/eval/gaps.json`](fixtures/eval/gaps.json))
+- **ต้องใช้ LLM อ่านความหมาย**
+  - คำสั่งขโมยข้อมูลที่เขียนเป็นภาษาคน
+  - ข้อความที่พูดกับตัวสแกนโดยตรง
+  - การชี้นำให้ใช้ลิงก์ affiliate
+- **ยังไม่มีกฎ**
+  - โหลดคำสั่งจากภายนอกมาทำตาม
+  - dump environment ทั้งก้อน
+  - แก้ `CLAUDE.md`
+  - zip ที่มีรหัสผ่าน
+  - `npx` ที่ไม่ล็อกเวอร์ชัน
+  - key ที่ฝังในไฟล์
+  - frontmatter ผิดสเปก
+- **เคสหลอกที่ยังเตือนผิด** skill สอนรีวิวที่ยกตัวอย่าง `curl … | bash` ไว้ใน code block (ต้องแยกบริบท code block ออกจากเนื้อความก่อน)
+
+## นอกขอบเขตของเวอร์ชันนี้
+
+- รันโค้ดใน sandbox เพื่อดูพฤติกรรมจริง
+- วิเคราะห์การไหลของข้อมูลข้ามไฟล์ (ตอนนี้ดูแค่ภายในไฟล์เดียว)
+- เทียบ hash ของไฟล์ binary กับฐานข้อมูล malware
+- ตรวจชื่อเสียงของผู้เผยแพร่และประวัติ commit
+- ตรวจช่องโหว่ของ dependency (CVE)
+
+## พัฒนาในเครื่อง
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # เว็บที่ http://localhost:3000
+npm test           # unit test ของตัวสแกน (ไม่ต่อ internet)
+npm run eval       # วัดผลกับชุดทดสอบ (ครั้งแรกดึง skill จริงจาก GitHub แล้ว cache ไว้ใน .eval-cache/)
+npm run db:migrate # แก้ schema ผ่าน migration เท่านั้น
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ต้องมีไฟล์ `.env.local` ที่ระบุ `DATABASE_URL` (Postgres บน Neon) ส่วน `GITHUB_TOKEN` จะใส่หรือไม่ก็ได้ ถ้าใส่จะได้โควตาเรียก GitHub API มากขึ้น
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Stack:** Next.js 16, TypeScript, Tailwind, shadcn/ui, Drizzle + Neon Postgres, Vitest, deploy บน Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> หมายเหตุ: repo นี้มีไฟล์ทดสอบที่หน้าตาเหมือน skill อันตราย (ดู [`fixtures/README.md`](fixtures/README.md))
+> ตัวสแกนของเจ้าอื่นอาจเตือน repo นี้ ทุกไฟล์ใช้แค่โดเมน `example.com`/`.invalid` และไม่มีอะไรรันได้จริง

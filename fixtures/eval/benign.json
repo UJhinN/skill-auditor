@@ -1,0 +1,12 @@
+{
+  "_comment": "Real, widely used public skills, pinned to a commit and fetched at eval time (not copied into this repo). 'pick' samples that many skill folders, spread evenly in sorted order. group 'general' should not be flagged; group 'security' is dual-use by design and is reported separately.",
+  "sources": [
+    { "repo": "anthropics/skills", "sha": "2c5958ecac7cee2b583967a2c4981d0f4a75c579", "pick": 20, "group": "general" },
+    { "repo": "vercel-labs/agent-skills", "sha": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62", "pick": 9, "group": "general" },
+    { "repo": "addyosmani/agent-skills", "sha": "301b02b12bff98e4688e6984af6556802322bbde", "pick": 10, "group": "general" },
+    { "repo": "coreyhaines31/marketingskills", "sha": "3e729622e3de0c82abdb906190d91f9018045872", "pick": 10, "group": "general" },
+    { "repo": "trailofbits/skills", "sha": "e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff", "pick": 10, "group": "security" },
+    { "repo": "mukul975/Anthropic-Cybersecurity-Skills", "sha": "54a798831d2266a3ca61ce68a7acb80b81160d57", "pick": 8, "group": "security" },
+    { "repo": "SnailSploit/Claude-Red", "sha": "a8de813edc9f66f60d44cfe42d47750e89d9930b", "pick": 8, "group": "security" }
+  ]
+}

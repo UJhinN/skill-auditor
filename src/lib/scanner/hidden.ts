@@ -1,20 +1,20 @@
 // Layer A — text a human reviewer can't see, or text that tries to take over the agent.
 
 import type { Finding } from "./types";
-import { excerpt, type FileKind, lineLocator, MAX_LINE } from "./util";
+import { excerpt, type FileKind, findIn, isQuoted, lineLocator } from "./util";
 
-const ZERO_WIDTH = /[​-‏⁠-⁤﻿­]/g;
-const BIDI = /[‪-‮⁦-⁩]/;
+const ZERO_WIDTH = /[\u200B-\u200F\u2060-\u2064\uFEFF\u00AD]/g;
+const BIDI = /[\u202A-\u202E\u2066-\u2069]/;
 const TAGS = /[\u{E0000}-\u{E007F}]+/gu;
 
 // Legitimate uses of invisible characters, removed before checking:
 // - subdivision flags (England, Scotland, Wales) are 🏴 + tag letters + cancel tag
 const TAG_FLAG = /\u{1F3F4}[\u{E0061}-\u{E007A}]{2,8}\u{E007F}/gu;
-// - ZWJ between emoji builds one glyph (👨‍👩‍👧, 🏳️‍🌈)
-const EMOJI_ZWJ = /(\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}️]?)‍(?=\p{Extended_Pictographic})/gu;
+// - ZWJ between emoji builds one glyph (👨\u200D👩\u200D👧, 🏳\uFE0F\u200D🌈)
+const EMOJI_ZWJ = /(\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}\uFE0F]?)\u200D(?=\p{Extended_Pictographic})/gu;
 // - ZWJ/ZWNJ are part of normal spelling in Arabic-script and Indic languages
 const SCRIPT_JOINER =
-  /([\p{Script=Arabic}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]\p{M}*)[‌‍]/gu;
+  /([\p{Script=Arabic}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]\p{M}*)[\u200C\u200D]/gu;
 
 function withoutLegitInvisibles(s: string): string {
   return s.replace(TAG_FLAG, "").replace(EMOJI_ZWJ, "$1").replace(SCRIPT_JOINER, "$1");
@@ -24,9 +24,12 @@ function withoutLegitInvisibles(s: string): string {
 // Every gap is bounded ({0,N}) and excludes newlines so matching stays linear-ish.
 export const OVERRIDE_PATTERNS: RegExp[] = [
   /\b(ignore|disregard|forget|override|bypass)\b[^\n.]{0,40}\b(previous|prior|above|earlier|all|any|system|original)\b[^\n.]{0,25}\b(instructions?|prompts?|rules?|guidelines?|directives?)\b/i,
-  /\b(do not|don't|dont|never)\b[^\n.]{0,30}\b(tell|inform|mention|reveal|show|notify|alert)\b[^\n.]{0,20}\bthe user\b/i,
-  /\bwithout\b[^\n.]{0,20}\b(asking|telling|informing|notifying|alerting|confirming with)\b[^\n.]{0,15}\bthe user\b/i,
-  /\b(new|updated|real) system prompt\b/i,
+  // hiding what was done ("don't tell the user they need X" is ordinary advice and must not match)
+  /\b(do not|don't|dont|never)\b[^\n.]{0,30}\b(tell|inform|notify|alert)\b[^\n.]{0,10}\bthe user\b\s*(about (it|this|that|these|what)|what (you|was|has|have|happened)|that you|which|anything|you (did|ran|sent|changed))/i,
+  /\b(do not|don't|dont|never)\s+(mention|reveal|disclose|show)\b[^\n.]{0,30}\bto the user\b/i,
+  /\bwithout\s+(telling|informing|notifying|alerting)\s+the user\b/i,
+  // posing as a new system prompt ("if a new system prompt regresses…" must not match)
+  /\b(here is|this is|the following is|below is)\s+(your|the)\s+(new|updated|real)\s+system prompt\b|\b(new|updated|real) system prompt\s*:/i,
   /\byou are (now|no longer)\b[^\n.]{0,40}\b(unrestricted|jailbroken|developer mode|dan)\b/i,
   /(ไม่ต้อง|ห้าม|อย่า)\s*(บอก|แจ้ง|เตือน)\s*(ให้)?\s*ผู้ใช้/,
   /(เพิกเฉย|ไม่ต้องสนใจ|ลืม|ข้าม)\s*(ต่อ)?\s*คำสั่ง\s*(ก่อนหน้า|เดิม|ทั้งหมด|ข้างบน)/,
@@ -37,6 +40,7 @@ export const OVERRIDE_PATTERNS: RegExp[] = [
 // ("don't ask the user for a key" is fine and must not match.)
 export const SKIP_CONFIRM_PATTERNS: RegExp[] = [
   /\b(do not|don't|dont|never|no need to)\b[^\n.]{0,30}\b(ask|request|wait)\b[^\n.]{0,25}\b(permission|confirmation|approval|consent)\b/i,
+  /\bwithout\s+asking\s+(the user|for (permission|confirmation|approval))\b/i,
   /(ไม่ต้อง|ห้าม|อย่า)\s*(ขอ|รอ)\s*(การ)?\s*(อนุญาต|ยืนยัน|อนุมัติ)/,
 ];
 
@@ -44,8 +48,10 @@ export const SKIP_CONFIRM_PATTERNS: RegExp[] = [
 const SUSPICIOUS_COMMENT =
   /\b(assistant|claude|agent|llm|model|system|instructions?|execute|run|curl|wget|token|secret|password|api[ _-]?key|send|upload|silently|secretly)\b/i;
 
+// Only meaningful in markdown, where hidden text is a trick. In .html app files,
+// display:none is ordinary UI. "font-size: 0.8rem" must not count as zero.
 const HIDDEN_STYLE =
-  /style\s*=\s*["'][^"']{0,200}(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|opacity\s*:\s*0(?![.\d]*[1-9])|color\s*:\s*(#fff\b|#ffffff\b|white\b))/i;
+  /style\s*=\s*["'][^"']{0,200}(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?![.\d])|opacity\s*:\s*0(?![.\d]*[1-9])|color\s*:\s*(#fff\b|#ffffff\b|white\b))/i;
 
 const BASE64_BLOB = /[A-Za-z0-9+/]{200,}={0,2}/;
 
@@ -63,7 +69,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
   const lines = content.split(/\r?\n/);
 
   lines.forEach((raw, i) => {
-    const line = raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) : raw;
+    const line = raw;
     const lineNo = i + 1;
     const clean = withoutLegitInvisibles(raw);
 
@@ -94,7 +100,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
     }
 
     // Zero-width characters (a BOM at the very start of the file is normal).
-    const scan = i === 0 && clean.startsWith("﻿") ? clean.slice(1) : clean;
+    const scan = i === 0 && clean.startsWith("\uFEFF") ? clean.slice(1) : clean;
     const zw = scan.match(ZERO_WIDTH);
     if (zw) {
       const many = zw.length >= 3;
@@ -111,22 +117,35 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
     }
 
     for (const p of OVERRIDE_PATTERNS) {
-      const m = p.exec(line);
-      if (m) {
-        out.push({
-          severity: "high",
-          rule: "hidden.instruction-override",
-          file: path,
-          line: lineNo,
-          message: "มีประโยคที่พยายามสั่งให้ AI ทิ้งคำสั่งเดิม หรือทำบางอย่างโดยไม่บอกผู้ใช้",
-          excerpt: excerpt(line, m.index),
-        });
-        break;
-      }
+      const m = findIn(line, p);
+      if (!m) continue;
+      // A quoted phrase is usually an example being discussed ("…a transcript saying
+      // 'ignore previous instructions' is data"), not an instruction. Still noted.
+      const quoted = isQuoted(line, m.index);
+      out.push(
+        quoted
+          ? {
+              severity: "low",
+              rule: "hidden.quoted-injection-phrase",
+              file: path,
+              line: lineNo,
+              message: "ยกประโยคแนว prompt injection มาในเครื่องหมายคำพูด น่าจะเป็นตัวอย่าง แต่ควรดูบริบท",
+              excerpt: excerpt(line, m.index),
+            }
+          : {
+              severity: "high",
+              rule: "hidden.instruction-override",
+              file: path,
+              line: lineNo,
+              message: "มีประโยคที่พยายามสั่งให้ AI ทิ้งคำสั่งเดิม หรือทำบางอย่างโดยไม่บอกผู้ใช้",
+              excerpt: excerpt(line, m.index),
+            },
+      );
+      break;
     }
 
     for (const p of SKIP_CONFIRM_PATTERNS) {
-      const m = p.exec(line);
+      const m = findIn(line, p);
       if (m) {
         out.push({
           severity: "medium",
@@ -141,7 +160,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
     }
 
     if (kind === "markdown") {
-      const m = HIDDEN_STYLE.exec(line);
+      const m = findIn(line, HIDDEN_STYLE);
       if (m) {
         out.push({
           severity: "medium",
@@ -154,15 +173,15 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
       }
     }
 
-    const b = BASE64_BLOB.exec(line);
+    const b = findIn(line, BASE64_BLOB);
     // Skip data: URIs (inline images) — matching starts right after "base64,".
-    if (b && !/base64,\s*$/i.test(line.slice(0, b.index))) {
+    if (b && !/base64,\s*$/i.test(line.slice(Math.max(0, b.index - 20), b.index))) {
       out.push({
         severity: "medium",
         rule: "hidden.encoded-blob",
         file: path,
         line: lineNo,
-        message: `มีข้อมูลเข้ารหัสยาว ${b[0].length} ตัวอักษร ที่คนอ่านไม่ออกว่าข้างในคืออะไร`,
+        message: `มีข้อมูลเข้ารหัสยาว ${b.match.length}+ ตัวอักษร ที่คนอ่านไม่ออกว่าข้างในคืออะไร`,
         excerpt: excerpt(line, b.index, 80),
       });
     }
@@ -190,7 +209,7 @@ function scanHtmlComments(path: string, content: string): Finding[] {
     const suspicious =
       end === -1 ||
       SUSPICIOUS_COMMENT.test(inner) ||
-      OVERRIDE_PATTERNS.some((p) => p.test(inner));
+      OVERRIDE_PATTERNS.some((p) => findIn(inner.replace(/\n/g, " "), p) !== null);
 
     out.push({
       severity: suspicious ? "high" : "low",

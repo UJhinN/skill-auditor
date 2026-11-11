@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# eval: cached copies of real skills fetched from GitHub (not ours to redistribute)
+/.eval-cache/

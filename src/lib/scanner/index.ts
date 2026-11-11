@@ -8,7 +8,7 @@ export type { Finding, ScanResult, Severity, SkillFile } from "./types";
 export { SEVERITIES } from "./types";
 
 /** Bump when rules change, so cached results from older rules aren't reused. */
-export const SCANNER_VERSION = "0.2.2";
+export const SCANNER_VERSION = "0.3.0";
 
 /** Max findings kept per (file, rule); the rest are summarized on the last one kept. */
 export const MAX_PER_RULE = 10;
@@ -31,7 +31,7 @@ export function scanFiles(files: SkillFile[]): ScanResult {
         rule: "hidden.oversized-file",
         file: f.path,
         line: null,
-        message: `ไฟล์ใหญ่ผิดปกติ (${(f.totalBytes / 1_000_000).toFixed(1)} MB) จึงสแกนได้แค่ส่วนต้น ส่วนที่เหลือยังไม่ได้ตรวจ`,
+        message: `ไฟล์ใหญ่ผิดปกติ (${(f.totalBytes / 1_000_000).toFixed(1)} MB) จึงสแกนแค่ส่วนต้นกับส่วนท้าย ส่วนกลางไฟล์ยังไม่ได้ตรวจ`,
       });
     }
   }

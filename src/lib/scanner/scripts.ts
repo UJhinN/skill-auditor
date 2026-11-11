@@ -2,7 +2,7 @@
 // because an agent will happily run a command it reads in SKILL.md.
 
 import type { Finding, Severity } from "./types";
-import { excerpt, type FileKind, isScriptComment, MAX_LINE } from "./util";
+import { excerpt, type FileKind, findIn, isScriptComment } from "./util";
 
 interface Rule {
   id: string;
@@ -21,8 +21,10 @@ export const RULES: Rule[] = [
     severity: "critical",
     message: "ดาวน์โหลดสคริปต์จาก internet แล้วรันทันทีโดยไม่มีใครได้ตรวจ",
     patterns: [
+      // needs an actual address (URL, host/path or a variable): prose like
+      // "never run `curl | sh` lines" is talking about the pattern, not doing it
       new RegExp(
-        String.raw`\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch)\b[^|\n]{0,300}\|\s*(sudo\s+)?${SHELLS}\b`,
+        String.raw`\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch)\b[^|\n]{0,300}?(https?://|\$\{?\w|\b[\w-]+\.[a-z]{2,}/)[^|\n]{0,300}\|\s*(sudo\s+)?${SHELLS}\b`,
         "i",
       ),
       /\b(iex|invoke-expression)\b[^\n]{0,200}\b(downloadstring|net\.webclient|invoke-webrequest|iwr|irm)\b/i,
@@ -67,6 +69,9 @@ export const RULES: Rule[] = [
   {
     id: "script.exfiltration",
     severity: "medium",
+    // API docs are full of `curl -X POST https://api.service.com`; in prose it only matters
+    // together with secret access (see credential-exfil below)
+    markdownSeverity: "low",
     message: "ส่งข้อมูลออกไปยังเครื่องอื่นผ่าน internet",
     patterns: [
       /\b(curl|wget)\b[^\n]{0,300}(\s-d\b|\s--data(-binary|-raw|-urlencode)?\b|\s-F\b|\s--form\b|\s-T\b|\s--upload-file\b|\s-X\s*POST\b|\s--post-(data|file)\b)/i,
@@ -115,6 +120,7 @@ export const RULES: Rule[] = [
   {
     id: "script.disable-security",
     severity: "medium",
+    markdownSeverity: "low",
     message: "ปิดระบบป้องกันหรือข้ามการตรวจสอบความปลอดภัย",
     patterns: [
       /\bset-mppreference\b[^\n]{0,100}-disable/i,
@@ -140,11 +146,11 @@ export function scanScripts(path: string, content: string, kind: FileKind): Find
 
   lines.forEach((raw, i) => {
     if (kind === "script" && isScriptComment(raw)) return;
-    const line = raw.length > MAX_LINE ? raw.slice(0, MAX_LINE) : raw;
+    const line = raw;
 
     for (const rule of RULES) {
       for (const p of rule.patterns) {
-        const m = p.exec(line);
+        const m = findIn(line, p);
         if (!m) continue;
         out.push({
           severity: kind === "markdown" && rule.markdownSeverity ? rule.markdownSeverity : rule.severity,

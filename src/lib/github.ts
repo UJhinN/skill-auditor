@@ -14,8 +14,9 @@ export const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.\.?$)[A-Za
 export const LIMITS = {
   maxFiles: 200,
   maxFileBytes: 1_000_000,
-  /** How much of an oversized file we still read */
+  /** How much of an oversized file we still read: its start and its end */
   partialBytes: 256 * 1024,
+  tailBytes: 64 * 1024,
   maxTotalBytes: 5_000_000,
   timeoutMs: 10_000,
   concurrency: 6,
@@ -124,7 +125,14 @@ export async function getHead(repo: string): Promise<Head> {
   return { commitSha: c.sha, treeSha: c.commit.tree.sha };
 }
 
-async function getTree(repo: string, treeSha: string): Promise<{ entries: TreeEntry[]; truncated: boolean }> {
+/** A specific commit (used by the eval to pin sources). */
+export async function getCommit(repo: string, sha: string): Promise<Head> {
+  const res = await request(`${API}/repos/${repoPath(repo)}/commits/${encodeURIComponent(sha)}`);
+  const body = (await res.json()) as { sha: string; commit: { tree: { sha: string } } };
+  return { commitSha: body.sha, treeSha: body.commit.tree.sha };
+}
+
+export async function getTree(repo: string, treeSha: string): Promise<{ entries: TreeEntry[]; truncated: boolean }> {
   const res = await request(`${API}/repos/${repoPath(repo)}/git/trees/${treeSha}?recursive=1`);
   const body = (await res.json()) as { tree: TreeEntry[]; truncated: boolean };
   return { entries: body.tree, truncated: body.truncated };
@@ -186,22 +194,43 @@ export function planFiles(entries: TreeEntry[]): {
       skipped.push({ path: b.path, status: "skipped", reason: "เกินขนาดรวมสูงสุด 5 MB" });
     } else {
       toFetch.push({ path: b.path, size });
-      budget -= size > LIMITS.maxFileBytes ? LIMITS.partialBytes : size;
+      budget -= size > LIMITS.maxFileBytes ? LIMITS.partialBytes + LIMITS.tailBytes : size;
     }
   }
   return { skillDirs, toFetch, skipped };
 }
 
+/**
+ * Join the start and end of an oversized file. Padding a file so the payload sits
+ * past what scanners read is a known trick, so the end is read too.
+ */
+export function stitchPartial(head: string, tail: string): string {
+  return `${head}\n\n[… ส่วนกลางไฟล์ไม่ได้อ่าน — เลขบรรทัดหลังจากนี้ไม่ตรงกับไฟล์จริง …]\n\n${tail}`;
+}
+
+async function fetchRange(url: string, range: string): Promise<Uint8Array> {
+  const res = await request(url, { headers: { Range: range } });
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 async function fetchFile(repo: string, sha: string, path: string, size: number): Promise<SkillFile> {
   if (size === 0) return { path, content: "" }; // raw.githubusercontent.com answers 501 for empty files
-  const partial = size > LIMITS.maxFileBytes;
-  const res = await request(`${RAW}/${repoPath(repo)}/${sha}/${encodePath(path)}`, {
-    headers: partial ? { Range: `bytes=0-${LIMITS.partialBytes - 1}` } : undefined,
-  });
-  let bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > LIMITS.maxFileBytes) bytes = bytes.slice(0, LIMITS.partialBytes); // server ignored Range
-  const content = new TextDecoder("utf-8").decode(bytes);
-  return partial || bytes.length < size ? { path, content, totalBytes: size } : { path, content };
+  const url = `${RAW}/${repoPath(repo)}/${sha}/${encodePath(path)}`;
+  const decode = (b: Uint8Array) => new TextDecoder("utf-8").decode(b);
+
+  if (size <= LIMITS.maxFileBytes) {
+    const res = await request(url);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length <= LIMITS.maxFileBytes) return { path, content: decode(bytes) };
+    // the tree under-reported the size; fall through to a partial read
+  }
+
+  let head = await fetchRange(url, `bytes=0-${LIMITS.partialBytes - 1}`);
+  let tail = await fetchRange(url, `bytes=-${LIMITS.tailBytes}`);
+  // if the server ignored Range and sent everything, cut it ourselves
+  if (head.length > LIMITS.partialBytes) head = head.slice(0, LIMITS.partialBytes);
+  if (tail.length > LIMITS.tailBytes) tail = tail.slice(tail.length - LIMITS.tailBytes);
+  return { path, content: stitchPartial(decode(head), decode(tail)), totalBytes: size };
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -217,8 +246,18 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
   return out;
 }
 
-export async function fetchSkill(repo: string, head: Head): Promise<FetchedSkill> {
-  const { entries, truncated } = await getTree(repo, head.treeSha);
+/**
+ * Fetch the skill files of a repo. With `only`, read just that one skill folder
+ * from an already-listed tree (the eval scans each skill on its own).
+ */
+export async function fetchSkill(
+  repo: string,
+  head: Head,
+  only?: { dir: string; entries: TreeEntry[] },
+): Promise<FetchedSkill> {
+  const { entries, truncated } = only
+    ? { entries: only.entries.filter((e) => only.dir === "" || e.path.startsWith(only.dir + "/")), truncated: false }
+    : await getTree(repo, head.treeSha);
   const { skillDirs, toFetch, skipped } = planFiles(entries);
 
   // One unreadable file is reported in coverage, not allowed to sink the whole scan.
@@ -239,7 +278,11 @@ export async function fetchSkill(repo: string, head: Head): Promise<FetchedSkill
   const coverage: CoverageEntry[] = [
     ...files.map((f): CoverageEntry =>
       f.totalBytes !== undefined
-        ? { path: f.path, status: "partial", reason: `อ่านแค่ ${Math.round(LIMITS.partialBytes / 1024)} KB แรก` }
+        ? {
+            path: f.path,
+            status: "partial",
+            reason: `ไฟล์ใหญ่เกิน อ่าน ${Math.round(LIMITS.partialBytes / 1024)} KB แรกกับ ${Math.round(LIMITS.tailBytes / 1024)} KB สุดท้าย`,
+          }
         : { path: f.path, status: "full" },
     ),
     ...failed.map((f): CoverageEntry => ({ path: f.failed, status: "skipped", reason: f.why })),
