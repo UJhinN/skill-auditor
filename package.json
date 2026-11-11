@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "eval": "tsx scripts/eval.ts",
+    "check:invisible": "node scripts/check-invisible.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
