@@ -25,14 +25,19 @@ function withoutLegitInvisibles(s: string): string {
 export const OVERRIDE_PATTERNS: RegExp[] = [
   /\b(ignore|disregard|forget|override|bypass)\b[^\n.]{0,40}\b(previous|prior|above|earlier|all|any|system|original)\b[^\n.]{0,25}\b(instructions?|prompts?|rules?|guidelines?|directives?)\b/i,
   /\b(do not|don't|dont|never)\b[^\n.]{0,30}\b(tell|inform|mention|reveal|show|notify|alert)\b[^\n.]{0,20}\bthe user\b/i,
-  // "don't ask the user for a key" is fine; skipping permission/confirmation is not
-  /\b(do not|don't|dont|never|no need to)\b[^\n.]{0,30}\b(ask|request|wait)\b[^\n.]{0,25}\b(permission|confirmation|approval|consent)\b/i,
   /\bwithout\b[^\n.]{0,20}\b(asking|telling|informing|notifying|alerting|confirming with)\b[^\n.]{0,15}\bthe user\b/i,
   /\b(new|updated|real) system prompt\b/i,
   /\byou are (now|no longer)\b[^\n.]{0,40}\b(unrestricted|jailbroken|developer mode|dan)\b/i,
   /(ไม่ต้อง|ห้าม|อย่า)\s*(บอก|แจ้ง|เตือน)\s*(ให้)?\s*ผู้ใช้/,
-  /(ไม่ต้อง|ห้าม|อย่า)\s*(ขอ|รอ)\s*(การ)?\s*(อนุญาต|ยืนยัน|อนุมัติ)/,
   /(เพิกเฉย|ไม่ต้องสนใจ|ลืม|ข้าม)\s*(ต่อ)?\s*คำสั่ง\s*(ก่อนหน้า|เดิม|ทั้งหมด|ข้างบน)/,
+];
+
+// Skipping the user's confirmation. Sometimes reasonable (a deploy skill the user
+// already invoked), sometimes how harm slips through — worth a look, not alarming alone.
+// ("don't ask the user for a key" is fine and must not match.)
+export const SKIP_CONFIRM_PATTERNS: RegExp[] = [
+  /\b(do not|don't|dont|never|no need to)\b[^\n.]{0,30}\b(ask|request|wait)\b[^\n.]{0,25}\b(permission|confirmation|approval|consent)\b/i,
+  /(ไม่ต้อง|ห้าม|อย่า)\s*(ขอ|รอ)\s*(การ)?\s*(อนุญาต|ยืนยัน|อนุมัติ)/,
 ];
 
 // Words that make an HTML comment worth a closer look.
@@ -114,6 +119,21 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
           file: path,
           line: lineNo,
           message: "มีประโยคที่พยายามสั่งให้ AI ทิ้งคำสั่งเดิม หรือทำบางอย่างโดยไม่บอกผู้ใช้",
+          excerpt: excerpt(line, m.index),
+        });
+        break;
+      }
+    }
+
+    for (const p of SKIP_CONFIRM_PATTERNS) {
+      const m = p.exec(line);
+      if (m) {
+        out.push({
+          severity: "medium",
+          rule: "hidden.skip-confirmation",
+          file: path,
+          line: lineNo,
+          message: "สั่งให้ AI ทำต่อโดยไม่ต้องขอความยินยอมหรือการยืนยันจากผู้ใช้ ควรดูว่าขั้นนั้นทำอะไร",
           excerpt: excerpt(line, m.index),
         });
         break;
