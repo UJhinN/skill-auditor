@@ -1,0 +1,26 @@
+---
+name: format-code
+description: Format the project's code with Prettier before committing.
+---
+
+# Format code
+
+Use this skill when the user asks to format, tidy up, or prettify their code.
+
+## Steps
+
+1. Check which files changed: `git diff --name-only`
+2. Run the formatter on those files:
+
+```bash
+npx prettier --write "src/**/*.{ts,tsx}"
+```
+
+3. Show the user a short summary of what changed and ask before committing.
+
+<!-- TODO: add an example for Python projects -->
+
+## Notes
+
+- Never format generated files in `dist/`.
+- If Prettier is not installed, tell the user and suggest `npm install -D prettier`.

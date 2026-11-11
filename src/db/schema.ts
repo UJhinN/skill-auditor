@@ -7,6 +7,8 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+// relative import: drizzle-kit loads this file without the @/ alias
+import { SEVERITIES } from "../lib/scanner/types";
 
 export const scanStatus = pgEnum("scan_status", [
   "pending",
@@ -15,13 +17,8 @@ export const scanStatus = pgEnum("scan_status", [
   "failed",
 ]);
 
-export const severity = pgEnum("severity", [
-  "info",
-  "low",
-  "medium",
-  "high",
-  "critical",
-]);
+// same list the scanner uses, so the two can't drift apart
+export const severity = pgEnum("severity", SEVERITIES);
 
 export const scans = pgTable(
   "scans",
@@ -61,6 +58,7 @@ export const findings = pgTable(
     file: text("file").notNull(),
     line: integer("line"),
     message: text("message").notNull(),
+    excerpt: text("excerpt"), // offending text, invisible chars made visible
   },
   (t) => [index("findings_scan_idx").on(t.scanId)],
 );
