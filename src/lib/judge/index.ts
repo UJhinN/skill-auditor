@@ -4,6 +4,7 @@
 // merge rules) lives here in code, not in the model.
 
 import { finalize, type Finding, type ScanResult, type SkillFile } from "../scanner";
+import { GroqJudge, QuotaError } from "./groq";
 import { mergeJudge } from "./merge";
 import { buildPrompt } from "./prompt";
 import { judgeReportJsonSchema, type JudgeReport, JudgeReportSchema } from "./schema";
@@ -19,10 +20,13 @@ export interface JudgeRequest {
 export interface Judge {
   /** e.g. "groq/openai/gpt-oss-120b" — recorded in every report */
   readonly model: string;
+  /** how much skill text this provider can take per request */
+  readonly maxInputChars?: number;
   complete(req: JudgeRequest): Promise<string>;
 }
 
 export class JudgeError extends Error {}
+export { QuotaError } from "./groq";
 
 export interface JudgeOutcome extends Pick<ScanResult, "findings" | "riskLevel" | "score"> {
   model: string;
@@ -57,7 +61,7 @@ export async function runJudge(
   opts: { maxInputChars?: number } = {},
 ): Promise<JudgeOutcome> {
   const prompt = buildPrompt(files, staticFindings, {
-    maxInputChars: opts.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
+    maxInputChars: opts.maxInputChars ?? judge.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS,
   });
   const req: JudgeRequest = { system: prompt.system, user: prompt.user, schema: judgeReportJsonSchema() };
 
@@ -69,6 +73,7 @@ export async function runJudge(
     try {
       raw = await judge.complete(req);
     } catch (e) {
+      if (e instanceof QuotaError) throw e; // callers treat "out of quota" differently
       throw new JudgeError(`judge call failed: ${e instanceof Error ? e.message : String(e)}`);
     }
     try {
@@ -112,8 +117,14 @@ export class MockJudge implements Judge {
 
 /**
  * The configured judge, or null when none is set up (scans then use rules only).
- * Real providers are added once an API key exists; until then this is always null.
+ * Groq is used when GROQ_API_KEY is set; SCANNER_MODEL picks the model.
  */
-export function getJudge(): Judge | null {
-  return null;
+export function getJudge(opts: { waitOnRateLimit?: boolean } = {}): Judge | null {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return null;
+  return new GroqJudge(key, {
+    model: process.env.SCANNER_MODEL || undefined,
+    maxInputChars: process.env.JUDGE_MAX_INPUT_CHARS ? Number(process.env.JUDGE_MAX_INPUT_CHARS) : undefined,
+    waitOnRateLimit: opts.waitOnRateLimit,
+  });
 }

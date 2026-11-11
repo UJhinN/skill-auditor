@@ -56,6 +56,9 @@ Finish by checking your own findings: remove any that restate another, and any w
 
 Return only a JSON object matching the report schema.`;
 
+/** Bump when the prompt changes, so cached eval answers are not reused. */
+export const PROMPT_VERSION = "1";
+
 export interface StaticHint {
   id: string;
   finding: Finding;
