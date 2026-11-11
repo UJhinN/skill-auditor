@@ -84,6 +84,7 @@ export function scanHidden(path: string, content: string, kind: FileKind): Findi
         line: lineNo,
         message: `มีข้อความซ่อนด้วย Unicode tag ที่มองไม่เห็น ถอดได้ว่า: "${decoded.slice(0, 120)}"`,
         excerpt: excerpt(clean, clean.search(TAGS)),
+        decoded,
       });
     }
 

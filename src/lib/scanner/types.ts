@@ -23,6 +23,12 @@ export interface Finding {
   message: string;
   /** The offending text with invisible characters made visible, trimmed */
   excerpt?: string;
+  /** Text recovered from something hidden (e.g. Unicode tag characters) */
+  decoded?: string;
+  /** "static" = pattern rule (default), "llm" = found by the LLM judge */
+  source?: "static" | "llm";
+  /** 0..1; pattern rules are 1 */
+  confidence?: number;
 }
 
 export interface ScanResult {

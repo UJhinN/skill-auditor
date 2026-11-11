@@ -14,7 +14,7 @@ export const SCANNER_VERSION = "0.3.0";
 export const MAX_PER_RULE = 10;
 
 export function scanFiles(files: SkillFile[]): ScanResult {
-  let all: Finding[] = [];
+  const all: Finding[] = [];
   let filesScanned = 0;
 
   for (const f of files) {
@@ -36,19 +36,21 @@ export function scanFiles(files: SkillFile[]): ScanResult {
     }
   }
 
-  all = capPerRule(all);
-  all.sort(
+  return { ...finalize(capPerRule(all)), filesScanned };
+}
+
+/** Sort most severe first and derive the overall risk and score. Used again after the LLM judge. */
+export function finalize(findings: Finding[]): Pick<ScanResult, "findings" | "riskLevel" | "score"> {
+  const sorted = [...findings].sort(
     (a, b) =>
       SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
       a.file.localeCompare(b.file) ||
       (a.line ?? 0) - (b.line ?? 0),
   );
-
   return {
-    findings: all,
-    riskLevel: all.length > 0 ? all[0].severity : "none_found", // sorted most severe first
-    score: computeScore(all),
-    filesScanned,
+    findings: sorted,
+    riskLevel: sorted.length > 0 ? sorted[0].severity : "none_found",
+    score: computeScore(sorted),
   };
 }
 

@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { findings, scans } from "@/db/schema";
 import { fetchSkill, GitHubError, type Head } from "./github";
-import { scanFiles } from "./scanner";
+import { getJudge, runJudge } from "./judge";
+import { type Finding, scanFiles } from "./scanner";
 
 /** A pending/running scan untouched for this long is treated as dead. */
 export const STALE_AFTER_MS = 3 * 60 * 1000;
@@ -21,7 +22,24 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
     const fetched = await fetchSkill(repo, head);
 
     await setStatus(id, { step: `กำลังสแกน ${fetched.files.length} ไฟล์` });
-    const result = scanFiles(fetched.files);
+    let result: { findings: Finding[]; score: number } = scanFiles(fetched.files);
+
+    // Optional second opinion from the LLM judge. Any failure (quota, timeout, bad
+    // answer) falls back to the rule-based result; the report says the AI didn't read it.
+    const judge = getJudge();
+    if (judge) {
+      await setStatus(id, { step: "AI กำลังอ่านเนื้อหา skill" });
+      try {
+        const out = await runJudge(judge, fetched.files, result.findings);
+        result = out;
+        for (const c of fetched.coverage) {
+          if (c.status !== "skipped") c.llm = out.included.includes(c.path) ? "read" : "not_read";
+        }
+      } catch (e) {
+        console.error(`scan ${id}: judge failed, using rules only`, e);
+        for (const c of fetched.coverage) if (c.status !== "skipped") c.llm = "not_read";
+      }
+    }
 
     // insert in chunks to stay well under query size limits
     for (let i = 0; i < result.findings.length; i += 200) {

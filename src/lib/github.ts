@@ -55,6 +55,8 @@ export interface CoverageEntry {
   path: string;
   status: "full" | "partial" | "skipped";
   reason?: string;
+  /** whether the LLM judge read this file; absent when no judge ran */
+  llm?: "read" | "not_read";
 }
 
 export interface FetchedSkill {
