@@ -1,9 +1,11 @@
 // One real judge call on a fixture, to check the provider wiring end to end.
-// Usage: npx tsx scripts/judge-smoke.ts [clean|malicious]
+// Usage: npx tsx scripts/judge-smoke.ts [clean|malicious] [groq|gemini]
+// With a provider named, exactly that provider is used (no fallback), which is how a new
+// provider's request shape is checked against the real API. A provider error is printed in full.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "dotenv";
-import { getJudge, runJudge } from "../src/lib/judge";
+import { getJudge, JUDGE_PROVIDERS, type JudgeProvider, runJudge } from "../src/lib/judge";
 import { scanFiles, type SkillFile } from "../src/lib/scanner";
 
 config({ path: join(import.meta.dirname, "..", ".env.local"), quiet: true });
@@ -22,8 +24,12 @@ const files: SkillFile[] =
       ];
 
 async function main() {
-const judge = getJudge({ waitOnRateLimit: true });
-if (!judge) throw new Error("GROQ_API_KEY not set in .env.local");
+const providerArg = process.argv[3];
+if (providerArg && !(JUDGE_PROVIDERS as readonly string[]).includes(providerArg)) {
+  throw new Error(`provider must be one of: ${JUDGE_PROVIDERS.join(", ")}`);
+}
+const judge = getJudge({ waitOnRateLimit: true, provider: providerArg as JudgeProvider | undefined });
+if (!judge) throw new Error(`no API key set in .env.local for ${providerArg ?? "any provider"}`);
 
 const statics = scanFiles(files);
 const t = Date.now();

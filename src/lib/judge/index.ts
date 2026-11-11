@@ -4,8 +4,11 @@
 // merge rules) lives here in code, not in the model.
 
 import { finalize, type Finding, type ScanResult, type SkillFile } from "../scanner";
-import { GroqJudge, QuotaError } from "./groq";
+import { FallbackJudge } from "./fallback";
+import { GeminiJudge } from "./gemini";
+import { GroqJudge } from "./groq";
 import { mergeJudge } from "./merge";
+import { QuotaError } from "./openai-compat";
 import { buildPrompt } from "./prompt";
 import { judgeReportJsonSchema, type JudgeReport, JudgeReportSchema } from "./schema";
 import { type Dropped, verifyFindings } from "./verify";
@@ -26,7 +29,7 @@ export interface Judge {
 }
 
 export class JudgeError extends Error {}
-export { QuotaError } from "./groq";
+export { QuotaError } from "./openai-compat";
 
 export interface JudgeOutcome extends Pick<ScanResult, "findings" | "riskLevel" | "score"> {
   model: string;
@@ -42,14 +45,33 @@ export interface JudgeOutcome extends Pick<ScanResult, "findings" | "riskLevel" 
   dropped: Dropped[];
 }
 
-/** Pull a JSON object out of a reply that may be wrapped in ``` fences or prose. */
+/**
+ * Pull a JSON object out of a reply. The reply is usually pure JSON; some models wrap it in
+ * ``` fences or add a sentence around it. A pure-JSON reply is tried first: its strings can
+ * legitimately contain ``` (evidence quoted from a SKILL.md code block), and treating those
+ * as the reply's own fence would cut the JSON apart.
+ */
 export function extractJson(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const text = fenced ? fenced[1] : raw;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+  const trimmed = raw.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // not pure JSON: look for a fenced block, then for the outermost braces
+  }
+  if (trimmed.startsWith("```")) {
+    const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```\s*$/);
+    if (fenced) {
+      try {
+        return JSON.parse(fenced[1]);
+      } catch {
+        // fall through to the brace search
+      }
+    }
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error("no JSON object in reply");
-  return JSON.parse(text.slice(start, end + 1));
+  return JSON.parse(trimmed.slice(start, end + 1));
 }
 
 export const DEFAULT_MAX_INPUT_CHARS = 40_000;
@@ -115,16 +137,60 @@ export class MockJudge implements Judge {
   }
 }
 
+export const JUDGE_PROVIDERS = ["groq", "gemini"] as const;
+export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
+
+/** JUDGE_PROVIDERS="groq,gemini" → the order to try. Unknown names are ignored; default is Groq only. */
+export function parseProviderOrder(value: string | undefined): JudgeProvider[] {
+  const wanted = (value ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is JudgeProvider => (JUDGE_PROVIDERS as readonly string[]).includes(s));
+  const unique = [...new Set(wanted)];
+  return unique.length > 0 ? unique : ["groq"];
+}
+
+function makeJudge(
+  provider: JudgeProvider,
+  o: { waitOnRateLimit?: boolean; timeoutMs?: number },
+): Judge | null {
+  const maxInputChars = process.env.JUDGE_MAX_INPUT_CHARS ? Number(process.env.JUDGE_MAX_INPUT_CHARS) : undefined;
+  if (provider === "groq") {
+    const key = process.env.GROQ_API_KEY;
+    if (!key) return null;
+    return new GroqJudge(key, {
+      // SCANNER_MODEL is the older name for this setting and keeps working
+      model: process.env.GROQ_MODEL || process.env.SCANNER_MODEL || undefined,
+      maxInputChars,
+      ...o,
+    });
+  }
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  return new GeminiJudge(key, {
+    model: process.env.GEMINI_MODEL || undefined,
+    reasoningEffort: process.env.GEMINI_REASONING_EFFORT || undefined,
+    maxInputChars,
+    ...o,
+  });
+}
+
+/** With several providers each one gets a short timeout, so a hung first one cannot use up the 60 s a scan has. */
+const CHAIN_TIMEOUT_MS = 22_000;
+
 /**
  * The configured judge, or null when none is set up (scans then use rules only).
- * Groq is used when GROQ_API_KEY is set; SCANNER_MODEL picks the model.
+ * - `provider` forces exactly that provider, with no fallback (the eval uses this so a run
+ *   never mixes models).
+ * - Otherwise JUDGE_PROVIDERS gives the order (default "groq"); providers without a key are
+ *   skipped, and two or more are tried in turn.
  */
-export function getJudge(opts: { waitOnRateLimit?: boolean } = {}): Judge | null {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return null;
-  return new GroqJudge(key, {
-    model: process.env.SCANNER_MODEL || undefined,
-    maxInputChars: process.env.JUDGE_MAX_INPUT_CHARS ? Number(process.env.JUDGE_MAX_INPUT_CHARS) : undefined,
-    waitOnRateLimit: opts.waitOnRateLimit,
-  });
+export function getJudge(opts: { waitOnRateLimit?: boolean; provider?: JudgeProvider } = {}): Judge | null {
+  const order = opts.provider ? [opts.provider] : parseProviderOrder(process.env.JUDGE_PROVIDERS);
+  const timeoutMs = order.length > 1 ? CHAIN_TIMEOUT_MS : undefined;
+  const judges = order
+    .map((p) => makeJudge(p, { waitOnRateLimit: opts.waitOnRateLimit, timeoutMs }))
+    .filter((j): j is Judge => j !== null);
+  if (judges.length === 0) return null;
+  return judges.length === 1 ? judges[0] : new FallbackJudge(judges);
 }

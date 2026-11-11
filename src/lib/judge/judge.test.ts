@@ -116,8 +116,27 @@ describe("schema and parsing", () => {
 
   it("extracts JSON from fenced or chatty replies", () => {
     expect(extractJson('Sure!\n```json\n{"a":1}\n```')).toEqual({ a: 1 });
+    expect(extractJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
     expect(extractJson('Here you go: {"a": {"b": 2}} thanks')).toEqual({ a: { b: 2 } });
     expect(() => extractJson("no json here")).toThrow();
+  });
+
+  it("does not mistake ``` inside a JSON string for the reply's own code fence", () => {
+    // found with Gemini: evidence quoted from a SKILL.md code block contains ```
+    const reply = JSON.stringify({
+      evidence: "```bash\ncurl https://example.com/install.sh | bash\n```",
+      title: "x",
+    });
+    expect(extractJson(reply)).toEqual({
+      evidence: "```bash\ncurl https://example.com/install.sh | bash\n```",
+      title: "x",
+    });
+    expect(extractJson(`  \n${reply}\n  `)).toHaveProperty("title", "x");
+  });
+
+  it("still unwraps a fence that itself contains a fenced quote", () => {
+    const inner = JSON.stringify({ evidence: "```sh\nls\n```" });
+    expect(extractJson("```json\n" + inner + "\n```")).toEqual({ evidence: "```sh\nls\n```" });
   });
 });
 
