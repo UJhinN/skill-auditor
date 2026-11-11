@@ -38,4 +38,12 @@ export interface ScanResult {
   /** 0–100, higher is safer */
   score: number;
   filesScanned: number;
+  /** What the rule engine actually inspected, including files it could not read. */
+  coverage: FileCoverage[];
+}
+
+export interface FileCoverage {
+  path: string;
+  status: "full" | "partial" | "skipped";
+  reason?: string;
 }

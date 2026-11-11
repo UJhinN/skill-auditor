@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="th">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ตัวอย่างหน้ารายงาน Skill Auditor</title>
+<!-- Preview by Codex, 2026-11-11 -->
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f2f5f8;color:#18263a;font:16px/1.55 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px}header,.grid{display:grid;gap:16px}section{background:#fff;border:1px solid #dce3eb;border-radius:16px;padding:20px}h1,h2,p,dl{margin:0 0 12px}h1,code{overflow-wrap:anywhere}h2{font-size:18px}a{color:#214d86}button{min-height:44px;padding:10px 16px;border:0;border-radius:10px;background:#173456;color:#fff;font:inherit;cursor:pointer;width:100%}button:disabled{opacity:.65}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #2573ca;outline-offset:3px}.grid{margin:16px 0}.counts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.counts div{background:#f1f5f9;border-radius:8px;padding:8px;text-align:center}dd{margin:0;font-size:26px;font-weight:700}dt{font-size:13px}.risk{color:#943b10;font-size:32px;font-weight:700}.warning{background:#fff4d7;color:#654100;border-radius:8px;padding:10px}.actions{min-width:210px}summary{cursor:pointer}small{color:#536275}@media(min-width:1024px){header{grid-template-columns:1fr auto}.grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){main{padding:16px}}
+</style>
+<main>
+  <p><small>Skill Auditor · ตัวอย่างข้อมูลจำลอง</small></p>
+  <header>
+    <div><h1>owner/example-skill</h1><p><code>commit a1b2c3d</code></p></div>
+    <div class="actions"><button id="retry" type="button">ตรวจเวอร์ชันล่าสุด</button><p id="status" role="status"></p></div>
+  </header>
+  <div class="grid">
+    <section><h2>ระดับความเสี่ยง</h2><p class="risk">สูง</p><p>พบ 3 รายการ · คะแนนจากกฎ 72/100</p></section>
+    <section><h2>ขอบเขตการตรวจ</h2>
+      <dl class="counts"><div><dt>อ่านครบ</dt><dd>12</dd></div><div><dt>อ่านบางส่วน</dt><dd>2</dd></div><div><dt>ข้าม</dt><dd>1</dd></div></dl>
+      <p class="warning">ตรวจไม่ครบ · ผลประเมินครอบคลุมเฉพาะส่วนที่ตรวจได้<br><a href="#coverage">ดูไฟล์และเหตุผล</a></p>
+    </section>
+  </div>
+  <div class="grid">
+    <section><h2>สิ่งที่พบ (3)</h2>
+      <details open><summary>สูง · <code>scripts/setup.sh:18</code></summary><p>พบคำสั่งดาวน์โหลดไฟล์แล้วสั่งรัน</p></details>
+      <details><summary>กลาง · <code>SKILL.md:24</code></summary><p>พบข้อความที่ตั้งค่าให้ซ่อน</p></details>
+      <details><summary>ต่ำ · <code>scripts/check.sh:8</code></summary><p>พบคำสั่งที่ขอสิทธิ์ผู้ดูแลระบบ</p></details>
+    </section>
+    <section id="coverage"><h2>ไฟล์ที่อ่านบางส่วนหรือข้าม</h2>
+      <ul><li><code>references/data.json</code> · อ่านบางส่วน เพราะไฟล์ใหญ่</li><li><code>references/catalog.txt</code> · อ่านบางส่วน เพราะไฟล์ใหญ่</li><li><code>assets/logo.png</code> · ข้าม เพราะเป็นไฟล์ภาพ</li></ul>
+    </section>
+  </div>
+</main>
+<script>
+const button = document.getElementById("retry");
+const status = document.getElementById("status");
+button.addEventListener("click", () => {
+  button.disabled = true;
+  button.textContent = "กำลังตรวจ…";
+  status.textContent = "กำลังจำลองการตรวจเวอร์ชันล่าสุด";
+  setTimeout(() => {
+    status.textContent = "จำลองสำเร็จ · commit ตรงกับรายงานเดิม";
+    button.textContent = "ตรวจเวอร์ชันล่าสุด";
+    button.disabled = false;
+  }, 650);
+});
+</script>
+</html>

@@ -1,14 +1,14 @@
 import { scanHidden } from "./hidden";
 import { computeScore } from "./score";
 import { scanScripts } from "./scripts";
-import type { Finding, ScanResult, SkillFile } from "./types";
-import { fileKind, SEVERITY_RANK } from "./util";
+import type { FileCoverage, Finding, ScanResult, SkillFile } from "./types";
+import { excerpt, fileKind, lineLocator, SEVERITY_RANK } from "./util";
 
 export type { Finding, ScanResult, Severity, SkillFile } from "./types";
 export { SEVERITIES } from "./types";
 
 /** Bump when rules change, so cached results from older rules aren't reused. */
-export const SCANNER_VERSION = "0.3.0";
+export const SCANNER_VERSION = "0.3.1";
 
 /** Max findings kept per (file, rule); the rest are summarized on the last one kept. */
 export const MAX_PER_RULE = 10;
@@ -16,11 +16,31 @@ export const MAX_PER_RULE = 10;
 export function scanFiles(files: SkillFile[]): ScanResult {
   const all: Finding[] = [];
   let filesScanned = 0;
+  const coverage: FileCoverage[] = [];
 
   for (const f of files) {
-    if (f.content.includes("\u0000")) continue; // binary, not ours to read
-    filesScanned++;
     const kind = fileKind(f.path);
+    const nul = f.content.indexOf("\u0000");
+    if (nul !== -1 && (kind === "other" || f.content.replaceAll("\u0000", "").trim().length === 0)) {
+      coverage.push({ path: f.path, status: "skipped", reason: "พบ NUL และไม่สามารถตีความไฟล์นี้เป็นข้อความที่รองรับได้" });
+      continue;
+    }
+    filesScanned++;
+    coverage.push({
+      path: f.path,
+      status: nul !== -1 || f.totalBytes !== undefined ? "partial" : "full",
+      reason: nul !== -1 ? "พบ NUL ตรวจได้เฉพาะข้อความที่อ่านได้ อาจมี encoding ที่ยังไม่รองรับ" : undefined,
+    });
+    if (nul !== -1) {
+      all.push({
+        severity: "medium",
+        rule: "hidden.null-byte",
+        file: f.path,
+        line: lineLocator(f.content)(nul),
+        message: "พบอักขระ NUL ในไฟล์ข้อความ ตรวจต่อในส่วนที่อ่านได้ แต่ควรตรวจ encoding และเนื้อหาด้วยตนเอง",
+        excerpt: excerpt(f.content, nul),
+      });
+    }
     all.push(...scanHidden(f.path, f.content, kind));
     all.push(...scanScripts(f.path, f.content, kind));
 
@@ -36,7 +56,7 @@ export function scanFiles(files: SkillFile[]): ScanResult {
     }
   }
 
-  return { ...finalize(capPerRule(all)), filesScanned };
+  return { ...finalize(capPerRule(all)), filesScanned, coverage };
 }
 
 /** Sort most severe first and derive the overall risk and score. Used again after the LLM judge. */

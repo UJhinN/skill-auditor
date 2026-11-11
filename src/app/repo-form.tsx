@@ -40,12 +40,12 @@ export function RepoForm() {
       const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok || !body.id) {
         setMessage(body.error ?? "เริ่มสแกนไม่สำเร็จ ลองใหม่อีกครั้ง");
-        setBusy(false);
         return;
       }
       router.push(`/scans/${body.id}`);
     } catch {
       setMessage("ติดต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    } finally {
       setBusy(false);
     }
   }

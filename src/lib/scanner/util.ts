@@ -83,7 +83,7 @@ export function isScriptComment(line: string): boolean {
 
 // Zero-width, bidi controls, BOM, soft hyphen, and Unicode tag characters.
 const INVISIBLE_ANY =
-  /[\u200B-\u200F\u2060-\u2064\u202A-\u202E\u2066-\u2069\uFEFF\u00AD]|[\u{E0000}-\u{E007F}]/gu;
+  /[\u0000\u200B-\u200F\u2060-\u2064\u202A-\u202E\u2066-\u2069\uFEFF\u00AD]|[\u{E0000}-\u{E007F}]/gu;
 
 /** Replace invisible characters with a visible ⟦U+XXXX⟧ marker. */
 export function reveal(text: string): string {

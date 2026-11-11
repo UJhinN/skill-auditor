@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import { githubLink, interpretRecheck, isLegacyReport, type ScanResponse, summarize } from "./report-model";
+
+const base: ScanResponse = {
+  id: "a",
+  repo: "demo/repo",
+  commitSha: "abcdef1234",
+  status: "done",
+  step: null,
+  error: null,
+  score: 90,
+  riskLevel: "low",
+  scannerVersion: "0.3.1",
+  coverage: [{ path: "SKILL.md", status: "full" }],
+  findings: [],
+};
+
+describe("isLegacyReport", () => {
+  it.each([null, undefined, "", "dev", "0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0"])("%s is old or unknown", (v) => {
+    expect(isLegacyReport(v)).toBe(true);
+  });
+
+  it.each(["0.3.1", "0.3.2", "0.3.10", "0.4.0", "1.0.0", "0.3.1-beta"])("%s is trusted", (v) => {
+    expect(isLegacyReport(v)).toBe(false);
+  });
+});
+
+describe("summarize", () => {
+  it("counts files by their real status and lists the incomplete ones", () => {
+    const s = summarize({
+      ...base,
+      coverage: [
+        { path: "a", status: "full" },
+        { path: "b", status: "full" },
+        { path: "c", status: "partial", reason: "ใหญ่" },
+        { path: "d", status: "skipped", reason: "ไฟล์ภาพ" },
+      ],
+    });
+    expect(s.files).toEqual({ full: 2, partial: 1, skipped: 1, read: 3 });
+    expect(s.incomplete.map((c) => c.path)).toEqual(["c", "d"]);
+    expect(s.insufficient).toBe(false);
+  });
+
+  it("counts findings by severity and takes the level from the scan", () => {
+    const s = summarize({
+      ...base,
+      riskLevel: "high",
+      findings: [
+        { severity: "high", rule: "r", file: "f", line: 1, message: "m", excerpt: null },
+        { severity: "high", rule: "r", file: "f", line: 2, message: "m", excerpt: null },
+        { severity: "low", rule: "r", file: "f", line: 3, message: "m", excerpt: null },
+      ],
+    });
+    expect(s.level).toBe("high");
+    expect(s.findingCount).toBe(3);
+    expect(s.severityCounts).toEqual({ high: 2, low: 1 });
+  });
+
+  it("falls back to none_found when the scan has no level", () => {
+    expect(summarize({ ...base, riskLevel: null }).level).toBe("none_found");
+  });
+
+  it("is insufficient and hides the score when no file was read", () => {
+    const s = summarize({ ...base, coverage: [{ path: "x", status: "skipped" }] });
+    expect(s.insufficient).toBe(true);
+    expect(s.showScore).toBe(false);
+    expect(summarize({ ...base, coverage: [] }).insufficient).toBe(true);
+  });
+
+  it("shows the score only for a current, readable report", () => {
+    expect(summarize(base).showScore).toBe(true);
+    expect(summarize({ ...base, scannerVersion: "0.3.0" }).showScore).toBe(false);
+    expect(summarize({ ...base, score: null }).showScore).toBe(false);
+  });
+});
+
+describe("interpretRecheck", () => {
+  it("says the report is current when the API returns the same scan", () => {
+    expect(interpretRecheck("a", true, { id: "a" })).toEqual({ kind: "current" });
+  });
+
+  it("points to the new scan when the API returns another id", () => {
+    expect(interpretRecheck("a", true, { id: "b" })).toEqual({ kind: "newer", id: "b" });
+  });
+
+  it("returns the API's own error message", () => {
+    expect(interpretRecheck("a", false, { error: "ไม่พบ repo นี้" })).toEqual({ kind: "error", message: "ไม่พบ repo นี้" });
+  });
+
+  it("has a fallback message when the error has no text or no id came back", () => {
+    expect(interpretRecheck("a", false, {})).toMatchObject({ kind: "error" });
+    expect(interpretRecheck("a", true, {})).toMatchObject({ kind: "error" });
+  });
+});
+
+describe("githubLink", () => {
+  it("pins the link to the commit and encodes the path", () => {
+    expect(githubLink("o/r", "abc", "dir/a b.md", 7)).toBe("https://github.com/o/r/blob/abc/dir/a%20b.md#L7");
+    expect(githubLink("o/r", null, "x.md", null)).toBe("https://github.com/o/r/blob/HEAD/x.md");
+  });
+});

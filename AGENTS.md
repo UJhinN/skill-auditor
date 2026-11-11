@@ -10,6 +10,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Skill Auditor — agent instructions
 
+## Attribution requested by the owner
+
+Added by Codex on 2026-11-11 at the owner's request. Identify the editing agent and date next to document sections it adds or substantially revises. Record code and fixture changes by file and scope in the agent's dated section of `docs/HANDOFF.md`, so attribution identifies the actual changes within existing files. Continue using the `Co-Authored-By` commit convention below.
+
 **Start by reading [`docs/HANDOFF.md`](docs/HANDOFF.md)** (project state, every file's role, next tasks) and, for scanner work, [`docs/scanner-spec.md`](docs/scanner-spec.md). The owner writes in Thai; user-facing text in the app is Thai, code and comments are English.
 
 Hard rules (details in HANDOFF section 6):

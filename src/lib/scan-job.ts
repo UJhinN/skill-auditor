@@ -4,6 +4,7 @@ import { findings, scans } from "@/db/schema";
 import { fetchSkill, GitHubError, type Head } from "./github";
 import { getJudge, runJudge } from "./judge";
 import { type Finding, scanFiles } from "./scanner";
+import { reveal } from "./scanner/util";
 
 /** A pending/running scan untouched for this long is treated as dead. */
 export const STALE_AFTER_MS = 3 * 60 * 1000;
@@ -22,7 +23,22 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
     const fetched = await fetchSkill(repo, head);
 
     await setStatus(id, { step: `กำลังสแกน ${fetched.files.length} ไฟล์` });
-    let result: { findings: Finding[]; score: number } = scanFiles(fetched.files);
+    const scanned = scanFiles(fetched.files);
+    const inspected = new Map(scanned.coverage.map((c) => [c.path, c]));
+    const coverage = fetched.coverage.map((c) => {
+      const actual = inspected.get(c.path);
+      if (!actual || actual.status === "full") return c;
+      return { ...c, status: actual.status, reason: [c.reason, actual.reason].filter(Boolean).join(" · ") };
+    });
+    if (scanned.filesScanned === 0) {
+      await setStatus(id, {
+        status: "failed", step: null, score: null, coverage,
+        error: "ข้อมูลไม่เพียงพอสำหรับประเมิน ไม่มีไฟล์ที่ตัวสแกนอ่านเป็นข้อความที่รองรับได้",
+      });
+      return;
+    }
+    const reviewedFiles = fetched.files.filter((f) => inspected.get(f.path)?.status !== "skipped");
+    let result: { findings: Finding[]; score: number } = scanned;
 
     // Optional second opinion from the LLM judge. Any failure (quota, timeout, bad
     // answer) falls back to the rule-based result; the report says the AI didn't read it.
@@ -30,14 +46,14 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
     if (judge) {
       await setStatus(id, { step: "AI กำลังอ่านเนื้อหา skill" });
       try {
-        const out = await runJudge(judge, fetched.files, result.findings);
+        const out = await runJudge(judge, reviewedFiles, result.findings);
         result = out;
-        for (const c of fetched.coverage) {
+        for (const c of coverage) {
           if (c.status !== "skipped") c.llm = out.included.includes(c.path) ? "read" : "not_read";
         }
       } catch (e) {
         console.error(`scan ${id}: judge failed, using rules only`, e);
-        for (const c of fetched.coverage) if (c.status !== "skipped") c.llm = "not_read";
+        for (const c of coverage) if (c.status !== "skipped") c.llm = "not_read";
       }
     }
 
@@ -50,8 +66,8 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
           rule: f.rule,
           file: f.file,
           line: f.line,
-          message: f.message,
-          excerpt: f.excerpt ?? null,
+          message: reveal(f.message),
+          excerpt: f.excerpt === undefined ? null : reveal(f.excerpt),
         })),
       );
     }
@@ -60,7 +76,7 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
       status: "done",
       step: null,
       score: result.score,
-      coverage: fetched.coverage,
+      coverage,
     });
   } catch (e) {
     console.error(`scan ${id} (${repo}) failed`, e);

@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 
 export default function ScanPage({ params }: PageProps<"/scans/[id]">) {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 py-12">
-      <Link href="/" className="font-mono text-sm text-muted-foreground hover:text-foreground">
+    <main className="mx-auto flex w-full max-w-[1120px] flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
+      <Link href="/" className="inline-flex min-h-9 items-center self-start font-mono text-sm text-muted-foreground hover:text-foreground">
         ← skill-auditor
       </Link>
       <Suspense fallback={<p className="text-muted-foreground">กำลังโหลด…</p>}>
@@ -22,5 +22,6 @@ export default function ScanPage({ params }: PageProps<"/scans/[id]">) {
 
 async function ReportForId({ params }: { params: PageProps<"/scans/[id]">["params"] }) {
   const { id } = await params;
-  return <Report id={id} />;
+  // key: opening another scan (the "check latest" button) must start from a clean state
+  return <Report key={id} id={id} />;
 }
