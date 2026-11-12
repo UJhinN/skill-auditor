@@ -188,8 +188,7 @@ export function groupBySkill(findings: Finding[], coverage: Coverage[]): SkillGr
     if (g.top === null || SEVERITY_ORDER.indexOf(f.severity) < SEVERITY_ORDER.indexOf(g.top)) g.top = f.severity;
   }
 
-  const rank = (g: SkillGroup) => (g.top === null ? SEVERITY_ORDER.length : SEVERITY_ORDER.indexOf(g.top));
-  return [...groups.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return [...groups.values()].sort((a, b) => b.findings.length - a.findings.length || a.name.localeCompare(b.name));
 }
 
 /** One line per distinct reason a file was not fully read, biggest first. */
@@ -203,4 +202,123 @@ export function incompleteReasons(items: Coverage[]): { status: Coverage["status
     else out.set(key, { status: c.status, reason, count: 1 });
   }
   return [...out.values()].sort((a, b) => b.count - a.count);
+}
+
+// ---------- "what this skill does" view ----------
+// A survey of 1,041 real skills (2026-11-12, see README) showed that severity verdicts from
+// pattern rules are often wrong: "critical" was mostly the official `curl … | sh` installers.
+// What a rule matched is still a true fact about the skill, so the report groups findings by
+// what the skill does and leaves the judgement to the reader.
+
+export type TopicId =
+  | "hidden-text"
+  | "ai-instruction"
+  | "send-out"
+  | "credentials"
+  | "run-remote"
+  | "privilege"
+  | "persistence"
+  | "destructive"
+  | "other";
+
+export interface Topic {
+  id: TopicId;
+  title: string;
+  /** one line that helps the reader weigh it; never a verdict */
+  note: string;
+}
+
+/** Display order: what a reader cannot see for themselves comes first. */
+export const TOPICS: Topic[] = [
+  {
+    id: "hidden-text",
+    title: "ข้อความที่คนอ่านไม่เห็นบนหน้าเว็บ",
+    note: "AI อ่านได้ แต่ไม่แสดงบน GitHub เช่น HTML comment หรืออักขระที่มองไม่เห็น หลายครั้งเป็นแค่หมายเหตุของผู้เขียน",
+  },
+  {
+    id: "ai-instruction",
+    title: "คำสั่งที่เปลี่ยนวิธีทำงานของ AI",
+    note: "เช่น ให้ข้ามการยืนยัน หรือให้เมินคำสั่งอื่น บางครั้งเขียนไว้เพื่อป้องกันการถูกหลอก ควรอ่านบริบทรอบข้าง",
+  },
+  {
+    id: "send-out",
+    title: "ส่งข้อมูลออกไปภายนอก",
+    note: "skill ที่เรียก API ต้องทำแบบนี้อยู่แล้ว ควรดูว่าส่งอะไร และส่งไปที่ไหน",
+  },
+  {
+    id: "credentials",
+    title: "แตะรหัสผ่าน key หรือ token",
+    note: "ควรดูว่าอ่านไฟล์ไหน และเกี่ยวกับงานที่ skill บอกว่าทำหรือไม่",
+  },
+  {
+    id: "run-remote",
+    title: "ดาวน์โหลดแล้วรันทันที",
+    note: "โปรแกรมติดตั้งทางการหลายตัวใช้วิธีนี้ เช่น curl … | sh ควรดูว่าดาวน์โหลดจากที่ไหน",
+  },
+  {
+    id: "privilege",
+    title: "ขอสิทธิ์ผู้ดูแลระบบ",
+    note: "เช่น sudo พบได้ทั่วไปในขั้นตอนติดตั้งโปรแกรม",
+  },
+  {
+    id: "persistence",
+    title: "ตั้งให้รันเองภายหลัง",
+    note: "เช่น cron หรือไฟล์เริ่มต้นของ shell ควรดูว่าตั้งให้รันอะไร",
+  },
+  {
+    id: "destructive",
+    title: "ลบข้อมูลหรือปิดระบบป้องกัน",
+    note: "ควรดูว่าลบอะไร หรือปิดการตรวจสอบส่วนไหน",
+  },
+  { id: "other", title: "อื่นๆ", note: "รายการที่ยังไม่ได้จัดหมวด" },
+];
+
+const RULE_TOPIC: Record<string, TopicId> = {
+  "hidden.zero-width": "hidden-text",
+  "hidden.unicode-tags": "hidden-text",
+  "hidden.bidi-control": "hidden-text",
+  "hidden.html-comment": "hidden-text",
+  "hidden.css-hidden": "hidden-text",
+  "hidden.null-byte": "hidden-text",
+  "hidden.encoded-blob": "hidden-text",
+  "hidden.oversized-file": "hidden-text",
+  "llm.obfuscation": "hidden-text",
+  "llm.concealment": "hidden-text",
+  "hidden.instruction-override": "ai-instruction",
+  "hidden.skip-confirmation": "ai-instruction",
+  "hidden.quoted-injection-phrase": "ai-instruction",
+  "llm.instruction-override": "ai-instruction",
+  "llm.scope-violation": "ai-instruction",
+  "llm.reviewer-manipulation": "ai-instruction",
+  "llm.undisclosed-commercial-steering": "ai-instruction",
+  "script.exfiltration": "send-out",
+  "script.exfil-endpoint": "send-out",
+  "script.credential-exfil": "send-out",
+  "llm.data-exfiltration": "send-out",
+  "llm.third-party-content-exposure": "send-out",
+  "script.credential-access": "credentials",
+  "llm.credential-access": "credentials",
+  "llm.secret-handling": "credentials",
+  "llm.financial-access": "credentials",
+  "script.pipe-to-shell": "run-remote",
+  "script.download-exec": "run-remote",
+  "script.encoded-exec": "run-remote",
+  "llm.remote-code-or-instructions": "run-remote",
+  "script.privilege": "privilege",
+  "llm.privilege-or-persistence": "privilege",
+  "script.persistence": "persistence",
+  "script.destructive": "destructive",
+  "script.disable-security": "destructive",
+  "llm.destructive-or-security-disabling": "destructive",
+};
+
+export function topicOf(rule: string): TopicId {
+  return RULE_TOPIC[rule] ?? "other";
+}
+
+/** Findings split by topic, in display order; topics with nothing are left out. */
+export function byTopic(findings: Finding[]): { topic: Topic; findings: Finding[] }[] {
+  return TOPICS.map((topic) => ({ topic, findings: findings.filter((f) => topicOf(f.rule) === topic.id) })).filter(
+    (t) => t.findings.length > 0,
+  );
 }

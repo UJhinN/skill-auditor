@@ -4,50 +4,21 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  byTopic,
   type Coverage,
   type Finding,
   githubLink,
   groupBySkill,
   incompleteReasons,
   interpretRecheck,
-  type RiskLevel,
-  RISK_LABEL,
   type ScanResponse,
-  SEVERITY_ORDER,
-  type Severity,
   summarize,
-  VERDICT,
 } from "./report-model";
-
-const SEVERITY_BADGE: Record<Severity, string> = {
-  critical: "bg-red-600 text-white",
-  high: "bg-orange-500 text-white",
-  medium: "bg-amber-300 text-amber-950",
-  low: "bg-sky-100 text-sky-900 dark:bg-sky-900 dark:text-sky-100",
-  info: "bg-muted text-muted-foreground",
-};
-
-const RISK_TEXT: Record<RiskLevel, string> = {
-  critical: "text-red-700 dark:text-red-400",
-  high: "text-orange-700 dark:text-orange-400",
-  medium: "text-amber-700 dark:text-amber-400",
-  low: "text-sky-700 dark:text-sky-400",
-  info: "text-foreground",
-  none_found: "text-foreground",
-};
 
 const CARD = "flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 sm:p-5";
 const WARNING =
   "rounded-lg bg-amber-100 p-3 text-sm leading-6 text-amber-950 dark:bg-amber-950 dark:text-amber-100";
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
-
-function SeverityBadge({ severity }: { severity: Severity }) {
-  return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${SEVERITY_BADGE[severity]}`}>
-      {RISK_LABEL[severity]}
-    </span>
-  );
-}
 
 function ReportHeader({ data, actions }: { data: ScanResponse; actions?: ReactNode }) {
   return (
@@ -119,7 +90,6 @@ function FindingRow({ f, data, open, shownPath }: { f: Finding; data: ScanRespon
         <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">
           ▸
         </span>
-        <SeverityBadge severity={f.severity} />
         <code className="font-mono text-sm [overflow-wrap:anywhere]">{`${shownPath}${f.line ? `:${f.line}` : ""}`}</code>
       </summary>
       <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
@@ -270,61 +240,57 @@ export function Report({ id }: { id: string }) {
   }
 
   const s = summarize(data);
-  const verdict = VERDICT[s.level];
   const readFiles = data.coverage.filter((c) => c.status !== "skipped");
-  const riskWord = s.insufficient
-    ? "ข้อมูลไม่เพียงพอสำหรับประเมิน"
-    : s.level === "none_found"
-      ? verdict.title
-      : RISK_LABEL[s.level];
   const skills = groupBySkill(data.findings, data.coverage);
   const bySkill = skills.length > 1;
   const flagged = skills.filter((g) => g.findings.length > 0);
   const quiet = skills.filter((g) => g.findings.length === 0);
   const quietIncomplete = quiet.filter((g) => g.incompleteCount > 0).length;
   const total = data.coverage.length;
-  const summaryLine =
-    `พบ ${s.findingCount} รายการ${s.showScore ? ` · คะแนน ${data.score}/100` : ""}` +
-    (bySkill && s.findingCount > 0 ? ` · อยู่ใน ${flagged.length} จาก ${skills.length} กลุ่มไฟล์` : "");
-  const firstFinding = flagged[0]?.findings[0];
+  const topics = byTopic(data.findings);
+  const firstFinding = flagged[0] ? byTopic(flagged[0].findings)[0]?.findings[0] : undefined;
+  const headline = s.insufficient
+    ? "ข้อมูลไม่เพียงพอสำหรับประเมิน"
+    : s.findingCount === 0
+      ? "ไม่พบสิ่งที่ตรงกับกฎ"
+      : `พบ ${s.findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
       <ReportHeader data={data} actions={actions} />
 
-      <section aria-labelledby="risk-heading" className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,22rem)] lg:gap-8`}>
+      <section aria-labelledby="summary-heading" className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,22rem)] lg:gap-8`}>
         <div className="flex flex-col gap-3">
-          <h2 id="risk-heading" className="text-sm font-medium text-muted-foreground">
-            ระดับความเสี่ยง
+          <h2 id="summary-heading" className="text-sm font-medium text-muted-foreground">
+            สิ่งที่ skill นี้ทำ
           </h2>
-          <p className={`text-3xl leading-tight font-bold sm:text-4xl ${s.insufficient ? "" : RISK_TEXT[s.level]}`}>
-            {riskWord}
-          </p>
-          <p className="text-sm leading-6 text-muted-foreground">
-            {s.insufficient ? (
-              "ไม่มีข้อมูลยืนยันว่าตัวสแกนตรวจไฟล์ใดได้ กรุณาสแกนใหม่หรือตรวจไฟล์ด้วยตนเอง"
-            ) : s.level === "none_found" ? (
-              verdict.detail
-            ) : (
-              <>
-                <strong className="font-semibold text-foreground">{verdict.title}</strong> · {verdict.detail}
-              </>
-            )}
-          </p>
-          <p className="text-sm text-muted-foreground">{summaryLine}</p>
-          {s.showScore && (
-            <p className="text-xs leading-5 text-muted-foreground">
-              คะแนนเริ่มที่ 100 แล้วหักตามสิ่งที่พบ ไม่ได้บอกว่า skill ปลอดภัยกี่เปอร์เซ็นต์
+          <p className="text-2xl leading-tight font-bold sm:text-3xl">{headline}</p>
+          {s.insufficient ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              ไม่มีข้อมูลยืนยันว่าตัวสแกนตรวจไฟล์ใดได้ กรุณาสแกนใหม่หรือตรวจไฟล์ด้วยตนเอง
             </p>
-          )}
-          {s.findingCount > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {SEVERITY_ORDER.filter((sev) => s.severityCounts[sev]).map((sev) => (
-                <span key={sev} className={`rounded px-2 py-0.5 text-xs font-medium ${SEVERITY_BADGE[sev]}`}>
-                  {RISK_LABEL[sev]} {s.severityCounts[sev]}
-                </span>
-              ))}
-            </div>
+          ) : s.findingCount === 0 ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              ไม่ได้แปลว่าปลอดภัย: ตัวสแกนรู้จักเฉพาะรูปแบบที่มีในชุดกฎ คำสั่งที่เขียนเป็นภาษาคนธรรมดายังตรวจไม่ได้
+            </p>
+          ) : (
+            <>
+              {bySkill && (
+                <p className="text-sm text-muted-foreground">{`อยู่ใน ${flagged.length} จาก ${skills.length} กลุ่มไฟล์`}</p>
+              )}
+              <ul className="flex flex-col gap-1 text-sm leading-6">
+                {topics.map((t) => (
+                  <li key={t.topic.id} className="flex items-baseline justify-between gap-3">
+                    <span>{t.topic.title}</span>
+                    <span className="text-muted-foreground tabular-nums">{`${t.findings.length} จุด`}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm leading-6 text-muted-foreground">
+                รายงานนี้บอกว่า skill ทำอะไร ไม่ได้ตัดสินว่าอันตรายหรือไม่ หลายข้อเป็นเรื่องปกติของงานบางประเภท
+                อ่านหลักฐานด้านล่างแล้วตัดสินใจเอง
+              </p>
+            </>
           )}
           {s.legacy && (
             <p role="alert" className={WARNING}>
@@ -354,7 +320,7 @@ export function Report({ id }: { id: string }) {
           </dl>
           {s.incomplete.length > 0 ? (
             <p role="alert" className={WARNING}>
-              {`ตรวจไม่ครบ · มี ${s.incomplete.length} รายการที่อ่านได้บางส่วนหรือข้าม ผลและคะแนนครอบคลุมเฉพาะส่วนที่ตรวจได้`}
+              {`ตรวจไม่ครบ · มี ${s.incomplete.length} รายการที่อ่านได้บางส่วนหรือข้าม ผลครอบคลุมเฉพาะส่วนที่ตรวจได้`}
               <br />
               <a href="#coverage" className={`inline-flex min-h-11 items-center font-medium underline underline-offset-2 ${FOCUS}`}>
                 ดูไฟล์และเหตุผล
@@ -368,35 +334,43 @@ export function Report({ id }: { id: string }) {
         </div>
       </section>
 
-      <section aria-labelledby="findings-heading" className={CARD}>
+      <section aria-labelledby="findings-heading" className={`${CARD} gap-5`}>
         <h2 id="findings-heading" className="text-lg font-semibold">
-          {`สิ่งที่พบ (${s.findingCount})`}
+          {`หลักฐาน (${s.findingCount})`}
         </h2>
         {s.findingCount === 0 ? (
           <p className="text-sm leading-6 text-muted-foreground">ไม่พบรายการที่ตรงกับกฎที่รู้จัก</p>
         ) : (
           flagged.map((g) => (
-            <div key={g.root ?? "(outside)"} className="flex flex-col gap-2">
+            <div key={g.root ?? "(outside)"} className="flex flex-col gap-3">
               {bySkill && (
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-foreground/10 pb-2">
                   <h3 className="font-mono text-base font-semibold [overflow-wrap:anywhere]">{g.name}</h3>
                   <p className="text-sm text-muted-foreground">
-                    {`${g.findings.length} รายการ · ${g.fileCount} ไฟล์`}
+                    {`${g.findings.length} จุด · ${g.fileCount} ไฟล์`}
                     {g.incompleteCount > 0 ? ` · ตรวจไม่ครบ ${g.incompleteCount} ไฟล์` : ""}
                   </p>
                 </div>
               )}
-              <div className="flex flex-col divide-y divide-foreground/10 rounded-lg ring-1 ring-foreground/10">
-                {g.findings.map((f, i) => (
-                  <FindingRow
-                    key={i}
-                    f={f}
-                    data={data}
-                    open={f === firstFinding}
-                    shownPath={bySkill && g.root ? f.file.slice(g.root.length + 1) : f.file}
-                  />
-                ))}
-              </div>
+              {byTopic(g.findings).map((t) => (
+                <div key={t.topic.id} className="flex flex-col gap-2">
+                  <div>
+                    <h4 className="text-sm font-semibold">{`${t.topic.title} (${t.findings.length})`}</h4>
+                    <p className="text-sm leading-6 text-muted-foreground">{t.topic.note}</p>
+                  </div>
+                  <div className="flex flex-col divide-y divide-foreground/10 rounded-lg ring-1 ring-foreground/10">
+                    {t.findings.map((f, i) => (
+                      <FindingRow
+                        key={i}
+                        f={f}
+                        data={data}
+                        open={f === firstFinding}
+                        shownPath={bySkill && g.root ? f.file.slice(g.root.length + 1) : f.file}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ))
         )}

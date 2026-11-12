@@ -28,15 +28,15 @@ afterEach(() => vi.clearAllMocks());
 describe("report coverage", () => {
   it("shows a complete current report normally", () => {
     const html = render(completed);
-    expect(html).toContain("คะแนน 100/100");
+    expect(html).toContain("ไม่พบสิ่งที่ตรงกับกฎ");
     expect(html).toContain("ครบทุกไฟล์");
     expect(html).not.toContain('role="alert"');
   });
 
-  it("warns about historical coverage and hides its score", () => {
+  it("warns about historical coverage and does not call it complete", () => {
     const html = render({ ...completed, scannerVersion: "0.3.0" });
     expect(html).toContain("รายงานรุ่นเก่า");
-    expect(html).not.toContain("คะแนน 100/100");
+    expect(html).not.toContain("ครบทุกไฟล์");
   });
 
   it("warns prominently when any file was skipped", () => {
@@ -44,28 +44,27 @@ describe("report coverage", () => {
       ...completed.coverage, { path: "data.unknown", status: "skipped", reason: "พบ NUL" },
     ] });
     expect(html).toContain("ตรวจไม่ครบ");
-    expect(html).toContain("ผลและคะแนนครอบคลุมเฉพาะส่วนที่ตรวจได้");
+    expect(html).toContain("ผลครอบคลุมเฉพาะส่วนที่ตรวจได้");
     expect(html).toContain("พบ NUL");
   });
 
-  it("does not show a perfect score when coverage is missing", () => {
+  it("does not report a clean result when coverage is missing", () => {
     const html = render({ ...completed, coverage: [] });
     expect(html).toContain("ข้อมูลไม่เพียงพอสำหรับประเมิน");
-    expect(html).not.toContain("คะแนน 100/100");
+    expect(html).not.toContain("ไม่พบสิ่งที่ตรงกับกฎ");
     expect(html).not.toContain("ครบทุกไฟล์");
   });
 
   it.each(["0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0"])("treats scanner %s reports as old", (version) => {
     const html = render({ ...completed, scannerVersion: version });
     expect(html).toContain("รายงานรุ่นเก่า");
-    expect(html).not.toContain("คะแนน 100/100");
     expect(html).not.toContain("ครบทุกไฟล์");
   });
 
   it("does not treat a newer scanner version as old", () => {
     const html = render({ ...completed, scannerVersion: "0.4.0" });
     expect(html).not.toContain("รายงานรุ่นเก่า");
-    expect(html).toContain("คะแนน 100/100");
+    expect(html).toContain("ครบทุกไฟล์");
   });
 
   it("shows file reasons when all files failed inspection", () => {
@@ -98,7 +97,7 @@ const manyFiles = [
 ];
 
 describe("report layout", () => {
-  it("shows the real risk level, finding count, score and file counts", () => {
+  it("says what the skill does by topic, with counts, and never a risk verdict or score", () => {
     const html = render({
       ...completed,
       riskLevel: "high",
@@ -106,9 +105,14 @@ describe("report layout", () => {
       findings: [finding(), finding({ severity: "medium", file: "SKILL.md", line: 24 }), finding({ severity: "low" })],
       coverage: manyFiles,
     });
-    expect(html).toMatch(/ระดับความเสี่ยง/);
-    expect(html).toMatch(/text-orange-700[^>]*>สูง</);
-    expect(html).toContain("พบ 3 รายการ · คะแนน 72/100");
+    expect(html).toContain("สิ่งที่ skill นี้ทำ");
+    expect(html).toContain("พบ 3 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(html).toContain("ดาวน์โหลดแล้วรันทันที (3)");
+    expect(html).toContain("ไม่ได้ตัดสินว่าอันตรายหรือไม่");
+    expect(html).not.toContain("ระดับความเสี่ยง");
+    expect(html).not.toContain("/100");
+    expect(html).not.toContain("ไม่ควรติดตั้ง");
+    expect(html).not.toMatch(/>(วิกฤต|สูง|กลาง|ต่ำ)</);
     expect(html).toMatch(/อ่านครบ<\/dt><dd[^>]*>12</);
     expect(html).toMatch(/อ่านบางส่วน<\/dt><dd[^>]*>2</);
     expect(html).toMatch(/ข้าม<\/dt><dd[^>]*>1</);
@@ -135,10 +139,9 @@ describe("report layout", () => {
     expect(html).toContain("scripts/setup.sh:40");
   });
 
-  it("states how many files were read next to the risk level", () => {
+  it("states how many files were read next to the summary", () => {
     const html = render({ ...completed, riskLevel: "medium", score: 90, findings: [finding({ severity: "medium" })], coverage: manyFiles });
     expect(html).toContain("อ่านครบ 12 จาก 15 ไฟล์");
-    expect(html).toContain("ไม่ได้บอกว่า skill ปลอดภัยกี่เปอร์เซ็นต์");
   });
 
   it("groups findings by skill and lists the skills with nothing found", () => {
@@ -162,6 +165,25 @@ describe("report layout", () => {
     expect(html).toContain("ไฟล์นอกโฟลเดอร์ skill");
   });
 
+  it("splits one skill's findings into topics, each with a note to weigh it", () => {
+    const html = render({
+      ...completed,
+      riskLevel: "critical",
+      findings: [
+        finding({ rule: "hidden.html-comment", file: "SKILL.md", line: 7, severity: "high" }),
+        finding(),
+        finding({ rule: "script.unknown-new-rule", line: 99 }),
+      ],
+    });
+    const hidden = html.indexOf("ข้อความที่คนอ่านไม่เห็นบนหน้าเว็บ (1)");
+    const remote = html.indexOf("ดาวน์โหลดแล้วรันทันที (1)");
+    const other = html.indexOf("อื่นๆ (1)");
+    expect(hidden).toBeGreaterThan(-1);
+    expect(remote).toBeGreaterThan(hidden); // hidden text is listed first
+    expect(other).toBeGreaterThan(remote); // an unmapped rule is still shown
+    expect(html).toContain("โปรแกรมติดตั้งทางการหลายตัวใช้วิธีนี้");
+  });
+
   it("prints finding text as text, never as HTML", () => {
     const html = render({
       ...completed,
@@ -175,8 +197,9 @@ describe("report layout", () => {
 
   it("never calls a clean result safe", () => {
     const html = render(completed);
-    expect(html).toContain("ไม่พบปัญหาที่รู้จัก");
+    expect(html).toContain("ไม่พบสิ่งที่ตรงกับกฎ");
     expect(html).toContain("ไม่ได้แปลว่าปลอดภัย");
+    expect(html).not.toMatch(/(?<!ไม่ได้แปลว่า)ปลอดภัย/);
     expect(html).toContain("ไม่พบรายการที่ตรงกับกฎที่รู้จัก");
   });
 
