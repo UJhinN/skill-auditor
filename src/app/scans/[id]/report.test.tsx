@@ -118,11 +118,13 @@ describe("report layout", () => {
     expect(html).toContain("assets/logo.png");
   });
 
-  it("shows the first few skipped files and keeps every other one one tap away", () => {
+  it("sums up skipped files by reason and keeps every one of them one tap away", () => {
     const skipped = Array.from({ length: 30 }, (_, i) => ({ path: `skip${i}.md`, status: "skipped", reason: "เกินจำนวนไฟล์" }));
     const html = render({ ...completed, coverage: [...completed.coverage, ...skipped] });
     expect(html).toContain("ตรวจไม่ครบ · มี 30 รายการ");
-    expect(html).toContain("ดูอีก 22 รายการ");
+    expect(html).toContain("ข้าม 30 ไฟล์");
+    expect(html).toContain("ดูทั้ง 30 รายการ");
+    expect((html.match(/เกินจำนวนไฟล์/g) ?? []).length).toBe(31); // one summary line + one per file
     for (const f of skipped) expect(html).toContain(f.path); // nothing is dropped, only folded
   });
 
@@ -131,6 +133,33 @@ describe("report layout", () => {
     expect((html.match(/<details open=""/g) ?? []).length).toBe(1);
     expect(html).toContain("scripts/setup.sh:18");
     expect(html).toContain("scripts/setup.sh:40");
+  });
+
+  it("states how many files were read next to the risk level", () => {
+    const html = render({ ...completed, riskLevel: "medium", score: 90, findings: [finding({ severity: "medium" })], coverage: manyFiles });
+    expect(html).toContain("อ่านครบ 12 จาก 15 ไฟล์");
+    expect(html).toContain("ไม่ได้บอกว่า skill ปลอดภัยกี่เปอร์เซ็นต์");
+  });
+
+  it("groups findings by skill and lists the skills with nothing found", () => {
+    const html = render({
+      ...completed,
+      riskLevel: "high",
+      findings: [finding({ file: "skills/deploy/scripts/setup.sh" })],
+      coverage: [
+        { path: "skills/deploy/SKILL.md", status: "full" },
+        { path: "skills/deploy/scripts/setup.sh", status: "full" },
+        { path: "skills/pdf/SKILL.md", status: "full" },
+        { path: "skills/docs/SKILL.md", status: "skipped", reason: "เกินจำนวนไฟล์" },
+        { path: "README.md", status: "full" },
+      ],
+    });
+    expect(html).toContain("อยู่ใน 1 จาก 4 กลุ่มไฟล์");
+    expect(html).toMatch(/<h3[^>]*>deploy<\/h3>/);
+    expect(html).toContain("scripts/setup.sh:18");
+    expect(html).toContain("อีก 3 กลุ่มไฟล์ไม่พบรายการที่ตรงกับกฎ (ในนั้น 1 กลุ่มตรวจไม่ครบ)");
+    expect(html).toContain("ตรวจไม่ครบ 1 จาก 1 ไฟล์");
+    expect(html).toContain("ไฟล์นอกโฟลเดอร์ skill");
   });
 
   it("prints finding text as text, never as HTML", () => {

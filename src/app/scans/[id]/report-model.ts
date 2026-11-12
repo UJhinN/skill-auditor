@@ -138,3 +138,69 @@ export function githubLink(repo: string, sha: string | null, file: string, line:
   const path = file.split("/").map(encodeURIComponent).join("/");
   return `https://github.com/${repo}/blob/${ref}/${path}${line ? `#L${line}` : ""}`;
 }
+
+// ---------- per-skill view ----------
+// People install one skill, not a whole repo. A skill is a folder that holds a SKILL.md;
+// every file belongs to the deepest such folder above it.
+
+export interface SkillGroup {
+  /** folder of the skill ("" = repo root); null = files outside every skill folder */
+  root: string | null;
+  name: string;
+  findings: Finding[];
+  /** highest severity among its findings */
+  top: Severity | null;
+  fileCount: number;
+  /** files of this skill read only in part or skipped */
+  incompleteCount: number;
+}
+
+export const OUTSIDE_SKILLS = "ไฟล์นอกโฟลเดอร์ skill";
+
+export function groupBySkill(findings: Finding[], coverage: Coverage[]): SkillGroup[] {
+  const roots = coverage
+    .filter((c) => c.path === "SKILL.md" || c.path.endsWith("/SKILL.md"))
+    .map((c) => (c.path === "SKILL.md" ? "" : c.path.slice(0, -"/SKILL.md".length)))
+    .sort((a, b) => b.length - a.length); // deepest first
+
+  const rootOf = (path: string): string | null => roots.find((r) => r === "" || path.startsWith(`${r}/`)) ?? null;
+
+  const groups = new Map<string | null, SkillGroup>();
+  const get = (root: string | null) => {
+    let g = groups.get(root);
+    if (!g) {
+      const name = root === null ? OUTSIDE_SKILLS : root === "" ? "skill ที่ราก repo" : (root.split("/").pop() ?? root);
+      g = { root, name, findings: [], top: null, fileCount: 0, incompleteCount: 0 };
+      groups.set(root, g);
+    }
+    return g;
+  };
+
+  for (const r of roots) get(r);
+  for (const c of coverage) {
+    const g = get(rootOf(c.path));
+    g.fileCount++;
+    if (c.status !== "full") g.incompleteCount++;
+  }
+  for (const f of findings) {
+    const g = get(rootOf(f.file));
+    g.findings.push(f);
+    if (g.top === null || SEVERITY_ORDER.indexOf(f.severity) < SEVERITY_ORDER.indexOf(g.top)) g.top = f.severity;
+  }
+
+  const rank = (g: SkillGroup) => (g.top === null ? SEVERITY_ORDER.length : SEVERITY_ORDER.indexOf(g.top));
+  return [...groups.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+/** One line per distinct reason a file was not fully read, biggest first. */
+export function incompleteReasons(items: Coverage[]): { status: Coverage["status"]; reason: string; count: number }[] {
+  const out = new Map<string, { status: Coverage["status"]; reason: string; count: number }>();
+  for (const c of items) {
+    const reason = c.reason ?? "ไม่ระบุเหตุผล";
+    const key = `${c.status}|${reason}`;
+    const cur = out.get(key);
+    if (cur) cur.count++;
+    else out.set(key, { status: c.status, reason, count: 1 });
+  }
+  return [...out.values()].sort((a, b) => b.count - a.count);
+}

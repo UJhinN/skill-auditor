@@ -5,7 +5,10 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   type Coverage,
+  type Finding,
   githubLink,
+  groupBySkill,
+  incompleteReasons,
   interpretRecheck,
   type RiskLevel,
   RISK_LABEL,
@@ -67,8 +70,6 @@ function ReportHeader({ data, actions }: { data: ScanResponse; actions?: ReactNo
   );
 }
 
-const SHOWN_INCOMPLETE = 8;
-
 function IncompleteItems({ items }: { items: Coverage[] }) {
   return (
     <ul className="flex flex-col gap-2 text-sm">
@@ -85,23 +86,63 @@ function IncompleteItems({ items }: { items: Coverage[] }) {
 }
 
 /**
- * Files that were read only in part or not at all, each with the reason. A big repo can skip
- * hundreds of files, so only the first few show; the rest are one tap away, none are hidden.
+ * Files that were read only in part or not at all. A big repo can skip hundreds of files for
+ * the same reason, so the reasons show as a short summary and the full list is one tap away.
  */
 function IncompleteList({ items }: { items: Coverage[] }) {
-  const rest = items.slice(SHOWN_INCOMPLETE);
   return (
     <>
-      <IncompleteItems items={items.slice(0, SHOWN_INCOMPLETE)} />
-      {rest.length > 0 && (
-        <details className="text-sm">
-          <summary className={`flex min-h-11 cursor-pointer items-center text-muted-foreground ${FOCUS}`}>
-            {`ดูอีก ${rest.length} รายการ`}
-          </summary>
-          <IncompleteItems items={rest} />
-        </details>
-      )}
+      <ul className="flex flex-col gap-1 text-sm leading-6">
+        {incompleteReasons(items).map((r) => (
+          <li key={`${r.status}|${r.reason}`}>
+            <strong className="font-semibold">{`${r.status === "partial" ? "อ่านบางส่วน" : "ข้าม"} ${r.count} ไฟล์`}</strong>
+            <span className="text-muted-foreground">{` — ${r.reason}`}</span>
+          </li>
+        ))}
+      </ul>
+      <details className="text-sm">
+        <summary className={`flex min-h-11 cursor-pointer items-center text-muted-foreground ${FOCUS}`}>
+          {`ดูทั้ง ${items.length} รายการ`}
+        </summary>
+        <IncompleteItems items={items} />
+      </details>
     </>
+  );
+}
+
+function FindingRow({ f, data, open, shownPath }: { f: Finding; data: ScanResponse; open: boolean; shownPath: string }) {
+  return (
+    <details open={open} className="group">
+      <summary
+        className={`flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 [&::-webkit-details-marker]:hidden ${FOCUS}`}
+      >
+        <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">
+          ▸
+        </span>
+        <SeverityBadge severity={f.severity} />
+        <code className="font-mono text-sm [overflow-wrap:anywhere]">{`${shownPath}${f.line ? `:${f.line}` : ""}`}</code>
+      </summary>
+      <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
+        <p className="text-sm leading-6">{f.message}</p>
+        {f.excerpt && (
+          // rendered as text only — never as HTML (blocks XSS from scanned files)
+          <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {f.excerpt}
+          </pre>
+        )}
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="font-mono">{f.rule}</span>
+          <a
+            className={`inline-flex min-h-11 items-center underline underline-offset-2 hover:text-foreground ${FOCUS}`}
+            href={githubLink(data.repo, data.commitSha, f.file, f.line)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            ดูบน GitHub
+          </a>
+        </p>
+      </div>
+    </details>
   );
 }
 
@@ -236,21 +277,29 @@ export function Report({ id }: { id: string }) {
     : s.level === "none_found"
       ? verdict.title
       : RISK_LABEL[s.level];
-  const summaryLine = `พบ ${s.findingCount} รายการ${s.showScore ? ` · คะแนน ${data.score}/100` : ""}`;
+  const skills = groupBySkill(data.findings, data.coverage);
+  const bySkill = skills.length > 1;
+  const flagged = skills.filter((g) => g.findings.length > 0);
+  const quiet = skills.filter((g) => g.findings.length === 0);
+  const quietIncomplete = quiet.filter((g) => g.incompleteCount > 0).length;
+  const total = data.coverage.length;
+  const summaryLine =
+    `พบ ${s.findingCount} รายการ${s.showScore ? ` · คะแนน ${data.score}/100` : ""}` +
+    (bySkill && s.findingCount > 0 ? ` · อยู่ใน ${flagged.length} จาก ${skills.length} กลุ่มไฟล์` : "");
+  const firstFinding = flagged[0]?.findings[0];
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
       <ReportHeader data={data} actions={actions} />
 
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-2">
-        <section aria-labelledby="risk-heading" className={CARD}>
-          <h2 id="risk-heading" className="text-lg font-semibold">
+      <section aria-labelledby="risk-heading" className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,22rem)] lg:gap-8`}>
+        <div className="flex flex-col gap-3">
+          <h2 id="risk-heading" className="text-sm font-medium text-muted-foreground">
             ระดับความเสี่ยง
           </h2>
-          <p className={`text-2xl leading-tight font-bold sm:text-3xl ${s.insufficient ? "" : RISK_TEXT[s.level]}`}>
+          <p className={`text-3xl leading-tight font-bold sm:text-4xl ${s.insufficient ? "" : RISK_TEXT[s.level]}`}>
             {riskWord}
           </p>
-          <p className="text-sm text-muted-foreground">{summaryLine}</p>
           <p className="text-sm leading-6 text-muted-foreground">
             {s.insufficient ? (
               "ไม่มีข้อมูลยืนยันว่าตัวสแกนตรวจไฟล์ใดได้ กรุณาสแกนใหม่หรือตรวจไฟล์ด้วยตนเอง"
@@ -262,9 +311,10 @@ export function Report({ id }: { id: string }) {
               </>
             )}
           </p>
-          {s.legacy && (
-            <p role="alert" className={WARNING}>
-              รายงานรุ่นเก่าอาจนับไฟล์ที่ถูกข้ามว่าอ่านครบ กดปุ่ม “ตรวจเวอร์ชันล่าสุด” เพื่อสแกน repo นี้ใหม่และยืนยันผล
+          <p className="text-sm text-muted-foreground">{summaryLine}</p>
+          {s.showScore && (
+            <p className="text-xs leading-5 text-muted-foreground">
+              คะแนนเริ่มที่ 100 แล้วหักตามสิ่งที่พบ ไม่ได้บอกว่า skill ปลอดภัยกี่เปอร์เซ็นต์
             </p>
           )}
           {s.findingCount > 0 && (
@@ -276,12 +326,18 @@ export function Report({ id }: { id: string }) {
               ))}
             </div>
           )}
-        </section>
+          {s.legacy && (
+            <p role="alert" className={WARNING}>
+              รายงานรุ่นเก่าอาจนับไฟล์ที่ถูกข้ามว่าอ่านครบ กดปุ่ม “ตรวจเวอร์ชันล่าสุด” เพื่อสแกน repo นี้ใหม่และยืนยันผล
+            </p>
+          )}
+        </div>
 
-        <section aria-labelledby="coverage-heading" className={CARD}>
-          <h2 id="coverage-heading" className="text-lg font-semibold">
+        <div className="flex flex-col gap-3 max-lg:border-t max-lg:border-foreground/10 max-lg:pt-4">
+          <h3 id="coverage-heading" className="text-sm font-medium text-muted-foreground">
             ขอบเขตการตรวจ
-          </h2>
+          </h3>
+          {total > 0 && <p className="text-base font-semibold">{`อ่านครบ ${s.files.full} จาก ${total} ไฟล์`}</p>}
           <dl className="grid grid-cols-3 gap-2 text-center">
             {(
               [
@@ -291,8 +347,8 @@ export function Report({ id }: { id: string }) {
               ] as const
             ).map(([label, n]) => (
               <div key={label} className="rounded-lg bg-muted p-2">
-                <dt className="text-xs text-muted-foreground sm:text-sm">{label}</dt>
-                <dd className="m-0 text-2xl font-bold">{n}</dd>
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="m-0 text-xl font-bold">{n}</dd>
               </div>
             ))}
           </dl>
@@ -300,7 +356,7 @@ export function Report({ id }: { id: string }) {
             <p role="alert" className={WARNING}>
               {`ตรวจไม่ครบ · มี ${s.incomplete.length} รายการที่อ่านได้บางส่วนหรือข้าม ผลและคะแนนครอบคลุมเฉพาะส่วนที่ตรวจได้`}
               <br />
-              <a href="#coverage" className={`inline-flex min-h-9 items-center font-medium underline underline-offset-2 ${FOCUS}`}>
+              <a href="#coverage" className={`inline-flex min-h-11 items-center font-medium underline underline-offset-2 ${FOCUS}`}>
                 ดูไฟล์และเหตุผล
               </a>
             </p>
@@ -309,77 +365,82 @@ export function Report({ id }: { id: string }) {
               {s.files.read > 0 && !s.legacy ? "อ่านครบทุกไฟล์" : "ควรสแกนใหม่เพื่อยืนยันขอบเขตการตรวจ"}
             </p>
           )}
-        </section>
-      </div>
+        </div>
+      </section>
 
-      <div className="grid gap-4 sm:gap-5 lg:grid-cols-2 lg:items-start">
-        <section aria-labelledby="findings-heading" className={CARD}>
-          <h2 id="findings-heading" className="text-lg font-semibold">
-            {`สิ่งที่พบ (${s.findingCount})`}
-          </h2>
-          {s.findingCount === 0 ? (
-            <p className="text-sm leading-6 text-muted-foreground">ไม่พบรายการที่ตรงกับกฎที่รู้จัก</p>
-          ) : (
-            <div className="flex flex-col divide-y divide-foreground/10 rounded-lg ring-1 ring-foreground/10">
-              {data.findings.map((f, i) => (
-                <details key={i} open={i === 0} className="group">
-                  <summary
-                    className={`flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 [&::-webkit-details-marker]:hidden ${FOCUS}`}
-                  >
-                    <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">
-                      ▸
-                    </span>
-                    <SeverityBadge severity={f.severity} />
-                    <code className="font-mono text-sm [overflow-wrap:anywhere]">
-                      {`${f.file}${f.line ? `:${f.line}` : ""}`}
-                    </code>
-                  </summary>
-                  <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
-                    <p className="text-sm leading-6">{f.message}</p>
-                    {f.excerpt && (
-                      // rendered as text only — never as HTML (blocks XSS from scanned files)
-                      <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap break-all">
-                        {f.excerpt}
-                      </pre>
-                    )}
-                    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span className="font-mono">{f.rule}</span>
-                      <a
-                        className={`inline-flex min-h-9 items-center underline underline-offset-2 hover:text-foreground ${FOCUS}`}
-                        href={githubLink(data.repo, data.commitSha, f.file, f.line)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        ดูบน GitHub
-                      </a>
-                    </p>
-                  </div>
-                </details>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section id="coverage" aria-labelledby="files-heading" className={`${CARD} scroll-mt-4`}>
-          <h2 id="files-heading" className="text-lg font-semibold">
-            {s.incomplete.length > 0 ? "ไฟล์ที่อ่านบางส่วนหรือข้าม" : "ไฟล์ที่ตรวจ"}
-          </h2>
-          <p className="text-sm text-muted-foreground">{`อ่าน ${s.files.read} ไฟล์`}</p>
-          {s.incomplete.length > 0 && <IncompleteList items={s.incomplete} />}
-          {readFiles.length > 0 && (
-            <details className="text-sm text-muted-foreground">
-              <summary className={`flex min-h-11 cursor-pointer items-center ${FOCUS}`}>ดูรายชื่อไฟล์ทั้งหมด</summary>
-              <ul className="mt-1 flex flex-col gap-1">
-                {readFiles.map((c) => (
-                  <li key={c.path} className="font-mono text-xs [overflow-wrap:anywhere]">
-                    {c.path}
-                  </li>
+      <section aria-labelledby="findings-heading" className={CARD}>
+        <h2 id="findings-heading" className="text-lg font-semibold">
+          {`สิ่งที่พบ (${s.findingCount})`}
+        </h2>
+        {s.findingCount === 0 ? (
+          <p className="text-sm leading-6 text-muted-foreground">ไม่พบรายการที่ตรงกับกฎที่รู้จัก</p>
+        ) : (
+          flagged.map((g) => (
+            <div key={g.root ?? "(outside)"} className="flex flex-col gap-2">
+              {bySkill && (
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h3 className="font-mono text-base font-semibold [overflow-wrap:anywhere]">{g.name}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {`${g.findings.length} รายการ · ${g.fileCount} ไฟล์`}
+                    {g.incompleteCount > 0 ? ` · ตรวจไม่ครบ ${g.incompleteCount} ไฟล์` : ""}
+                  </p>
+                </div>
+              )}
+              <div className="flex flex-col divide-y divide-foreground/10 rounded-lg ring-1 ring-foreground/10">
+                {g.findings.map((f, i) => (
+                  <FindingRow
+                    key={i}
+                    f={f}
+                    data={data}
+                    open={f === firstFinding}
+                    shownPath={bySkill && g.root ? f.file.slice(g.root.length + 1) : f.file}
+                  />
                 ))}
-              </ul>
-            </details>
-          )}
-        </section>
-      </div>
+              </div>
+            </div>
+          ))
+        )}
+        {bySkill && quiet.length > 0 && (
+          <details className="text-sm">
+            <summary className={`flex min-h-11 cursor-pointer items-center text-muted-foreground ${FOCUS}`}>
+              {`อีก ${quiet.length} กลุ่มไฟล์ไม่พบรายการที่ตรงกับกฎ` +
+                (quietIncomplete > 0 ? ` (ในนั้น ${quietIncomplete} กลุ่มตรวจไม่ครบ)` : "")}
+            </summary>
+            <ul className="mt-1 flex flex-col gap-1">
+              {quiet.map((g) => (
+                <li key={g.root ?? "(outside)"}>
+                  <code className="font-mono text-xs [overflow-wrap:anywhere]">{g.name}</code>
+                  <span className="text-muted-foreground">
+                    {g.incompleteCount > 0
+                      ? ` · ตรวจไม่ครบ ${g.incompleteCount} จาก ${g.fileCount} ไฟล์`
+                      : ` · อ่านครบ ${g.fileCount} ไฟล์`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </section>
+
+      <section id="coverage" aria-labelledby="files-heading" className={`${CARD} scroll-mt-4`}>
+        <h2 id="files-heading" className="text-lg font-semibold">
+          {s.incomplete.length > 0 ? "ไฟล์ที่อ่านบางส่วนหรือข้าม" : "ไฟล์ที่ตรวจ"}
+        </h2>
+        <p className="text-sm text-muted-foreground">{`อ่าน ${s.files.read} ไฟล์`}</p>
+        {s.incomplete.length > 0 && <IncompleteList items={s.incomplete} />}
+        {readFiles.length > 0 && (
+          <details className="text-sm text-muted-foreground">
+            <summary className={`flex min-h-11 cursor-pointer items-center ${FOCUS}`}>ดูรายชื่อไฟล์ที่อ่าน</summary>
+            <ul className="mt-1 flex flex-col gap-1">
+              {readFiles.map((c) => (
+                <li key={c.path} className="font-mono text-xs [overflow-wrap:anywhere]">
+                  {c.path}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </section>
 
       <p className="text-xs leading-5 text-muted-foreground">
         ตรวจแบบอ่านอย่างเดียว ไม่มีการรันโค้ดใดๆ ใช้ชุดกฎหารูปแบบที่รู้จักเท่านั้น
