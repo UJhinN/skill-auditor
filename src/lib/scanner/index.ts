@@ -8,7 +8,7 @@ export type { Finding, ScanResult, Severity, SkillFile } from "./types";
 export { SEVERITIES } from "./types";
 
 /** Bump when rules change, so cached results from older rules aren't reused. */
-export const SCANNER_VERSION = "0.3.1";
+export const SCANNER_VERSION = "0.3.2";
 
 /** Max findings kept per (file, rule); the rest are summarized on the last one kept. */
 export const MAX_PER_RULE = 10;
