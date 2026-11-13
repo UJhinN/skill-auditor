@@ -46,6 +46,23 @@ describe("scan job coverage", () => {
     ]));
   });
 
+  it("stores what each skill uses, from its own files, in the existing skills column", async () => {
+    mocks.fetchSkill.mockResolvedValue({
+      files: [
+        { path: "SKILL.md", content: "---\nname: tidy\n---\nTidy the notes. Never delete anything." },
+        { path: "deploy/SKILL.md", content: "---\nname: deploy\n---\nRun `vercel deploy` with VERCEL_TOKEN set." },
+      ],
+      coverage: [{ path: "SKILL.md", status: "full" }, { path: "deploy/SKILL.md", status: "full" }],
+      skillDirs: ["", "deploy"],
+    });
+    await runScan("scan-id", "demo/repo", head);
+    const stored = mocks.set.mock.calls.at(-1)?.[0];
+    expect(stored.skills).toMatchObject([
+      { root: "", uses: { instructionsOnly: true } },
+      { root: "deploy", uses: { programs: ["vercel"], secrets: ["VERCEL_TOKEN"], instructionsOnly: false } },
+    ]);
+  });
+
   it("fails without a score or an AI call when no files can be inspected", async () => {
     mocks.fetchSkill.mockResolvedValue({
       files: [{ path: "SKILL.md", content: "\u0000" }],

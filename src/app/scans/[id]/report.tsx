@@ -10,11 +10,19 @@ import {
   githubLink,
   groupBySkill,
   incompleteReasons,
+  INSTRUCTIONS_ONLY_NOTE,
   interpretRecheck,
+  MAX_MERGED,
+  mergeUses,
+  ruleResultLine,
   type ScanResponse,
+  SHOWN_CHIPS,
   type SkillInfo,
+  type SkillUses,
   skillTitle,
   summarize,
+  USES_GROUPS,
+  usesLine,
 } from "./report-model";
 import { targetText } from "../../../lib/target"; // relative: the tests run without the @/ alias
 
@@ -26,6 +34,105 @@ const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visi
 const SHOWN_SKILLS = 6;
 const AI_BADGE = "rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground";
 
+
+/**
+ * Monospace chips, the first few always visible and the rest behind a toggle. Plain text
+ * only: these values come from untrusted files, so nothing here is ever a link.
+ */
+function Chips({ items }: { items: string[] }) {
+  const chip = "rounded-md bg-muted px-2 py-1 font-mono text-xs leading-5 [overflow-wrap:anywhere]";
+  const head = items.slice(0, SHOWN_CHIPS);
+  const rest = items.slice(SHOWN_CHIPS);
+  return (
+    <>
+      <ul className="flex flex-wrap gap-1.5">
+        {head.map((v) => (
+          <li key={v} className={chip}>
+            {v}
+          </li>
+        ))}
+      </ul>
+      {rest.length > 0 && (
+        <details className="group text-sm">
+          <summary className={`flex min-h-11 cursor-pointer items-center text-muted-foreground ${FOCUS}`}>
+            <span className="group-open:hidden">{`ดูทั้งหมด (${items.length})`}</span>
+            <span className="hidden group-open:inline">ซ่อน</span>
+          </summary>
+          <ul className="flex flex-wrap gap-1.5">
+            {rest.map((v) => (
+              <li key={v} className={chip}>
+                {v}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
+  );
+}
+
+/** The five groups of an inventory; groups with nothing in them are left out. */
+function UsesGroups({ uses, skillCount = 1 }: { uses: SkillUses; skillCount?: number }) {
+  if (uses.instructionsOnly) {
+    return (
+      <div className="flex flex-col gap-1">
+        <p className="text-base leading-7 font-semibold">{usesLine(uses, skillCount)}</p>
+        <p className="text-sm leading-6 text-muted-foreground">{INSTRUCTIONS_ONLY_NOTE}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      {USES_GROUPS.filter((g) => uses[g.key].length > 0).map((g) => {
+        const items = uses[g.key];
+        return (
+          <div key={g.key} className="flex flex-col gap-1.5">
+            <h3 className="text-sm font-semibold">
+              {g.title}
+              <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{`(${items.length})`}</span>
+            </h3>
+            {g.note && <p className="text-xs leading-5 text-muted-foreground">{g.note}</p>}
+            <Chips items={items.slice(0, MAX_MERGED)} />
+            {items.length > MAX_MERGED && (
+              <p className="text-xs text-muted-foreground">{`แสดง ${MAX_MERGED} รายการแรกจาก ${items.length}`}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** “skill นี้ใช้อะไรบ้าง”: the whole inventory, or a pointer to re-check when the scan predates it. */
+function UsesCard({ skills }: { skills: SkillInfo[] | null | undefined }) {
+  if (!skills || skills.length === 0) return null; // SkillAbout already explains old reports
+  const uses = mergeUses(skills);
+  return (
+    <section aria-labelledby="uses-heading" className={CARD}>
+      <h2 id="uses-heading" className="text-lg font-semibold">
+        skill นี้ใช้อะไรบ้าง
+      </h2>
+      {uses ? (
+        <>
+          {skills.length > 1 && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {`รวมจาก ${skills.length} skill · ดูแยกทีละ skill ได้โดยกดที่รายการ skill ด้านบน`}
+            </p>
+          )}
+          <UsesGroups uses={uses} skillCount={skills.length} />
+          <p className="text-xs leading-5 text-muted-foreground">
+            อ่านจากข้อความในไฟล์ของ skill เท่านั้น ไม่ได้รันอะไร และไม่ได้บอกว่าสิ่งเหล่านี้ดีหรือไม่ดี
+          </p>
+        </>
+      ) : (
+        <p className="text-sm leading-6 text-muted-foreground">
+          รายงานนี้สร้างก่อนที่ระบบจะสรุปสิ่งที่ skill ใช้ กดปุ่ม “ตรวจเวอร์ชันล่าสุด” เพื่อดูรายการนี้
+        </p>
+      )}
+    </section>
+  );
+}
+
 /** Compact row for repos with several skills: name and summary; tap to see the original. */
 function SkillRow({ info }: { info: SkillInfo }) {
   const line = info.summary ?? info.description ?? "ไม่มีคำอธิบายใน SKILL.md";
@@ -35,9 +142,12 @@ function SkillRow({ info }: { info: SkillInfo }) {
       <span className={`line-clamp-2 text-sm leading-6 [overflow-wrap:anywhere] ${info.description ? "" : "text-muted-foreground"}`}>
         {line}
       </span>
+      {info.uses && (
+        <span className="text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">{usesLine(info.uses)}</span>
+      )}
     </span>
   );
-  if (!info.description) return <li className="min-h-11">{body}</li>;
+  if (!info.description && !info.uses) return <li className="min-h-11">{body}</li>;
   return (
     <li>
       <details className="group">
@@ -47,9 +157,14 @@ function SkillRow({ info }: { info: SkillInfo }) {
             ▾
           </span>
         </summary>
-        <p className="mb-2 whitespace-pre-line rounded-lg bg-muted p-3 text-sm leading-6 [overflow-wrap:anywhere]">
-          {info.description}
-        </p>
+        <div className="mb-2 flex flex-col gap-3">
+          {info.description && (
+            <p className="whitespace-pre-line rounded-lg bg-muted p-3 text-sm leading-6 [overflow-wrap:anywhere]">
+              {info.description}
+            </p>
+          )}
+          {info.uses && <UsesGroups uses={info.uses} />}
+        </div>
       </details>
     </li>
   );
@@ -381,11 +496,15 @@ export function Report({ id }: { id: string }) {
   const total = data.coverage.length;
   const topics = byTopic(data.findings);
   const firstFinding = flagged[0] ? byTopic(flagged[0].findings)[0]?.findings[0] : undefined;
+  // Reports made before the inventory existed have no `uses`: they keep the old headline.
+  const uses = mergeUses(data.skills ?? []);
   const headline = s.insufficient
     ? "ข้อมูลไม่เพียงพอสำหรับประเมิน"
-    : s.findingCount === 0
-      ? "ไม่พบสิ่งที่ตรงกับกฎ"
-      : `พบ ${s.findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
+    : uses
+      ? usesLine(uses, data.skills?.length ?? 1)
+      : s.findingCount === 0
+        ? "ไม่พบสิ่งที่ตรงกับกฎ"
+        : `พบ ${s.findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
@@ -399,6 +518,12 @@ export function Report({ id }: { id: string }) {
             สิ่งที่ skill นี้ทำ
           </h2>
           <p className="text-2xl leading-tight font-bold sm:text-3xl">{headline}</p>
+          {uses && !s.insufficient && (
+            <p className="text-base leading-7">
+              <span className="text-muted-foreground">ผลตรวจด้วยกฎ: </span>
+              <strong className="font-semibold">{ruleResultLine(s.findingCount)}</strong>
+            </p>
+          )}
           {s.insufficient ? (
             <p className="text-sm leading-6 text-muted-foreground">
               ไม่มีข้อมูลยืนยันว่าตัวสแกนตรวจไฟล์ใดได้ กรุณาสแกนใหม่หรือตรวจไฟล์ด้วยตนเอง
@@ -467,6 +592,8 @@ export function Report({ id }: { id: string }) {
           )}
         </div>
       </section>
+
+      <UsesCard skills={data.skills} />
 
       <section aria-labelledby="findings-heading" className={`${CARD} gap-5`}>
         <h2 id="findings-heading" className="text-lg font-semibold">

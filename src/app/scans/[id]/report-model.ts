@@ -1,6 +1,10 @@
 // Pure data and logic behind the report page: types, Thai labels, and the numbers the
 // page shows (risk level, file counts, warnings). No React here, so it is easy to test.
 
+import type { SkillUses } from "../../../lib/inventory"; // relative: the tests run without the @/ alias
+
+export type { SkillUses };
+
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 export type RiskLevel = Severity | "none_found";
 
@@ -26,6 +30,8 @@ export interface SkillInfo {
   description: string | null;
   /** one-line Thai summary written by an LLM, when it was available */
   summary: string | null;
+  /** what the skill uses; missing on scans made before the inventory existed */
+  uses?: SkillUses | null;
 }
 
 export interface ScanResponse {
@@ -350,4 +356,81 @@ export function byTopic(findings: Finding[]): { topic: Topic; findings: Finding[
   return TOPICS.map((topic) => ({ topic, findings: findings.filter((f) => topicOf(f.rule) === topic.id) })).filter(
     (t) => t.findings.length > 0,
   );
+}
+
+// ---------- "what this skill uses" view ----------
+// A neutral inventory (programs, sites, secrets …) that every report can show, even when no
+// rule matched. It lists what the files contain; it never says whether that is a problem.
+
+export const INSTRUCTIONS_ONLY = "skill นี้มีแต่คำแนะนำให้ AI ไม่มีคำสั่งให้รันโปรแกรม";
+export const INSTRUCTIONS_ONLY_NOTE =
+  "คำแนะนำที่เขียนเป็นภาษาคนธรรมดา ตัวสแกนอ่านไม่ได้ ควรอ่าน SKILL.md ด้วยตนเอง";
+/** Chips shown before the “ดูทั้งหมด” toggle. */
+export const SHOWN_CHIPS = 8;
+/** A merged list for a repo with many skills is shown up to this many entries. */
+export const MAX_MERGED = 100;
+
+export type UsesGroupKey = "programs" | "sites" | "secrets" | "envVars" | "paths";
+
+export const USES_GROUPS: { key: UsesGroupKey; title: string; note?: string }[] = [
+  {
+    key: "programs",
+    title: "โปรแกรมที่สั่งรัน",
+    note: "ดูจากคำสั่งในบล็อกโค้ดและสคริปต์ของ skill ไม่ได้แปลว่าจะรันครบทุกตัวเสมอไป",
+  },
+  {
+    key: "sites",
+    title: "เว็บที่อ้างถึง",
+    note: "ชื่อเว็บที่ปรากฏในไฟล์ หลายรายการเป็นลิงก์เอกสาร ไม่ได้แปลว่า skill ติดต่อเว็บนั้นจริง แสดงเป็นข้อความเท่านั้น ไม่ใช่ลิงก์",
+  },
+  {
+    key: "secrets",
+    title: "ความลับที่ใช้",
+    note: "การใช้ token หรือ key เป็นเรื่องปกติของหลายเครื่องมือ ควรดูว่ามันถูกส่งไปที่ไหน",
+  },
+  { key: "envVars", title: "ตัวแปรอื่น" },
+  {
+    key: "paths",
+    title: "ไฟล์/โฟลเดอร์นอกโปรเจค",
+    note: "ตำแหน่งนอกโฟลเดอร์ของโปรเจค เช่น โฟลเดอร์ตั้งค่าในเครื่องของผู้ใช้",
+  },
+];
+
+/** “ใช้ 3 โปรแกรม · อ้างถึง 6 เว็บ · แตะความลับ 1 ตัว”: only the groups that have something. */
+export function usesLine(u: SkillUses, skillCount = 1): string {
+  if (u.instructionsOnly) {
+    return skillCount > 1
+      ? `skill ทั้ง ${skillCount} ตัวมีแต่คำแนะนำให้ AI ไม่มีคำสั่งให้รันโปรแกรม`
+      : INSTRUCTIONS_ONLY;
+  }
+  const parts: string[] = [];
+  if (u.programs.length) parts.push(`ใช้ ${u.programs.length} โปรแกรม`);
+  if (u.sites.length) parts.push(`อ้างถึง ${u.sites.length} เว็บ`);
+  if (u.secrets.length) parts.push(`แตะความลับ ${u.secrets.length} ตัว`);
+  if (u.envVars.length) parts.push(`ตัวแปรอื่น ${u.envVars.length} ตัว`);
+  if (u.paths.length) parts.push(`อ้างถึงที่นอกโปรเจค ${u.paths.length} ที่`);
+  return parts.join(" · ");
+}
+
+/** What the rules found, in one short line. Never a verdict. */
+export function ruleResultLine(findingCount: number): string {
+  return findingCount === 0 ? "ไม่พบรูปแบบเสี่ยงที่รู้จัก" : `พบ ${findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
+}
+
+/**
+ * The inventories of several skills as one: each list is the union, items used by more
+ * skills first. Skills scanned before the inventory existed (no `uses`) are left out; null
+ * when none of them has one, so the report can tell “not recorded” from “nothing found”.
+ */
+export function mergeUses(skills: Pick<SkillInfo, "uses">[]): SkillUses | null {
+  const withUses = skills.map((k) => k.uses).filter((u): u is SkillUses => !!u);
+  if (withUses.length === 0) return null;
+  if (withUses.length === 1) return withUses[0];
+  const merge = (key: UsesGroupKey): string[] => {
+    const counts = new Map<string, number>();
+    for (const u of withUses) for (const v of u[key]) counts.set(v, (counts.get(v) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([v]) => v);
+  };
+  const lists = { programs: merge("programs"), sites: merge("sites"), secrets: merge("secrets"), envVars: merge("envVars"), paths: merge("paths") };
+  return { ...lists, instructionsOnly: Object.values(lists).every((l) => l.length === 0) };
 }

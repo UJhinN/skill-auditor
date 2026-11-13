@@ -69,10 +69,33 @@ describe("collectSkillInfo", () => {
       { path: "skills/b/run.sh", content: "echo" },
       { path: "skills/a/SKILL.md", content: fm("name: a") },
     ]);
-    expect(got).toEqual([
+    expect(got).toMatchObject([
       { root: "skills/a", name: "a", description: null, summary: null },
       { root: "skills/b", name: null, description: "B", summary: null },
     ]);
+  });
+
+  it("adds what each skill uses, from its own files only", () => {
+    const got = collectSkillInfo([
+      { path: "SKILL.md", content: fm("name: outer") + "\nRun `git status`.\n" },
+      { path: "scripts/a.sh", content: "curl https://api.outer.dev/x\n" },
+      { path: "inner/SKILL.md", content: fm("name: inner") + "\nSet `INNER_TOKEN`.\n" },
+      { path: "inner/run.sh", content: "docker ps\n" },
+    ]);
+    const outer = got.find((g) => g.root === "")!;
+    const inner = got.find((g) => g.root === "inner")!;
+    expect(outer.uses).toMatchObject({ programs: ["curl", "git"], sites: ["api.outer.dev"], secrets: [] });
+    expect(inner.uses).toMatchObject({ programs: ["docker"], sites: [], secrets: ["INNER_TOKEN"] });
+  });
+
+  it("keeps the inventory when summaries are filled in", async () => {
+    const [info] = collectSkillInfo([{ path: "SKILL.md", content: fm("description: D") + "\nRun `git log`.\n" }]);
+    const [out] = await summarizeSkills([info], {
+      model: "m",
+      complete: async () => JSON.stringify({ summaries: [{ id: 0, th: "สรุป" }] }),
+    });
+    expect(out.summary).toBe("สรุป");
+    expect(out.uses?.programs).toEqual(["git"]);
   });
 });
 

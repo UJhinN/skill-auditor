@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { githubLink, interpretRecheck, isLegacyReport, type ScanResponse, summarize, TOPICS, topicOf } from "./report-model";
+import {
+  githubLink, INSTRUCTIONS_ONLY, interpretRecheck, isLegacyReport, mergeUses, ruleResultLine,
+  type ScanResponse, summarize, TOPICS, topicOf, usesLine,
+} from "./report-model";
 
 const base: ScanResponse = {
   id: "a",
@@ -104,5 +107,39 @@ describe("agent-bypass topic", () => {
   it("groups the permission-bypass rule under its own topic", () => {
     expect(topicOf("script.agent-bypass-permissions")).toBe("agent-bypass");
     expect(TOPICS.find((t) => t.id === "agent-bypass")?.title).toBe("สั่ง AI ตัวอื่นให้ทำงานโดยไม่ขออนุญาต");
+  });
+});
+
+describe("inventory summary", () => {
+  const empty = { programs: [], sites: [], secrets: [], envVars: [], paths: [], instructionsOnly: false };
+
+  it("names only the groups that have something", () => {
+    expect(usesLine({ ...empty, programs: ["a", "b", "c"], sites: ["x", "y"], secrets: ["T"] })).toBe(
+      "ใช้ 3 โปรแกรม · อ้างถึง 2 เว็บ · แตะความลับ 1 ตัว",
+    );
+    expect(usesLine({ ...empty, programs: ["a"] })).toBe("ใช้ 1 โปรแกรม");
+    expect(usesLine({ ...empty, envVars: ["P"], paths: ["~/.x", "/etc/y"] })).toBe("ตัวแปรอื่น 1 ตัว · อ้างถึงที่นอกโปรเจค 2 ที่");
+  });
+
+  it("says a skill with no commands is only advice", () => {
+    expect(usesLine({ ...empty, instructionsOnly: true })).toBe(INSTRUCTIONS_ONLY);
+    expect(usesLine({ ...empty, instructionsOnly: true }, 4)).toContain("ทั้ง 4 ตัว");
+  });
+
+  it("words the rule result without a verdict", () => {
+    expect(ruleResultLine(0)).toBe("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
+    expect(ruleResultLine(3)).toBe("พบ 3 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(ruleResultLine(0)).not.toContain("ปลอดภัย");
+  });
+
+  it("merges skills: union, shared items first, null when nothing was recorded", () => {
+    expect(mergeUses([{}, { uses: null }])).toBeNull();
+    const a = { uses: { ...empty, programs: ["git", "npm"] } };
+    const b = { uses: { ...empty, programs: ["docker", "git"], instructionsOnly: false } };
+    expect(mergeUses([a])).toBe(a.uses);
+    expect(mergeUses([a, b, {}])?.programs).toEqual(["git", "docker", "npm"]);
+    const none = { uses: { ...empty, instructionsOnly: true } };
+    expect(mergeUses([none, none])?.instructionsOnly).toBe(true);
+    expect(mergeUses([none, a])?.instructionsOnly).toBe(false);
   });
 });

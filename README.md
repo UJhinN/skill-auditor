@@ -10,16 +10,17 @@ See what an AI agent skill on GitHub does before you install it. Enter `owner/re
 - **Hidden text:** invisible Unicode tags (decoded), zero-width and bidi characters, hidden HTML/CSS, long encoded blobs
 - **Instructions to the AI:** "ignore previous instructions", hide things from the user, skip confirmation
 - **Script commands:** download-and-run, encoded execution, touching credentials, sending data out, reverse shells, persistence, wide deletes, disabling protections, sudo
+- **What the skill uses:** programs it tells the agent to run, sites its files mention, credential-like and other environment variables, and places outside the project (`~/.ssh`, `/etc`, …), read from the text only and shown as plain facts, so a report is useful even when no rule matched
 - **Coverage:** which files were read fully, partly, or skipped. The best result is "nothing matched the rules", never "safe"
 
 ## How well it works
 
-Rules only, scanner 0.3.1, measured with `npm run eval` on 75 real skills from 7 popular repos plus hand-written cases:
+Rules only, scanner 0.3.3, measured with `npm run eval` on 75 real skills from 7 popular repos plus hand-written cases:
 
 | Threshold | Caught (cases rules should catch) | Caught (incl. known blind spots) | False alarms on real skills | Precision |
 |---|---|---|---|---|
-| medium+ | 24/25 | 25/35 | 1/49 | 89% |
-| high+ | 20/25 | 20/35 | 0/49 | 95% |
+| medium+ | 25/26 | 26/36 | 1/49 | 90% |
+| high+ | 20/26 | 20/36 | 0/49 | 95% |
 
 - Adding an LLM judge (free Groq) raised recall incl. blind spots from 70% to 94% on the 60 of 120 cases the free quota allowed.
 - A rules-only survey of 1,041 skills from 133 popular repos flagged 9% as high or critical, and the evidence sampled by hand was almost all harmless (e.g. official `curl | sh` installers). So the report describes what a skill does instead of giving a risk score.
