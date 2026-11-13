@@ -235,6 +235,7 @@ export function incompleteReasons(items: Coverage[]): { status: Coverage["status
 export type TopicId =
   | "hidden-text"
   | "ai-instruction"
+  | "agent-bypass"
   | "send-out"
   | "credentials"
   | "run-remote"
@@ -261,6 +262,11 @@ export const TOPICS: Topic[] = [
     id: "ai-instruction",
     title: "คำสั่งที่เปลี่ยนวิธีทำงานของ AI",
     note: "เช่น ให้ข้ามการยืนยัน หรือให้เมินคำสั่งอื่น บางครั้งเขียนไว้เพื่อป้องกันการถูกหลอก ควรอ่านบริบทรอบข้าง",
+  },
+  {
+    id: "agent-bypass",
+    title: "สั่ง AI ตัวอื่นให้ทำงานโดยไม่ขออนุญาต",
+    note: "เปิด AI coding agent อีกตัวโดยปิดการถามก่อนรันคำสั่งหรือแก้ไฟล์ บางงานตั้งแบบนี้ในสภาพแวดล้อมที่แยกไว้ ควรดูว่า agent นั้นรันที่ไหนและเข้าถึงอะไรได้",
   },
   {
     id: "send-out",
@@ -313,6 +319,7 @@ const RULE_TOPIC: Record<string, TopicId> = {
   "llm.scope-violation": "ai-instruction",
   "llm.reviewer-manipulation": "ai-instruction",
   "llm.undisclosed-commercial-steering": "ai-instruction",
+  "script.agent-bypass-permissions": "agent-bypass",
   "script.exfiltration": "send-out",
   "script.exfil-endpoint": "send-out",
   "script.credential-exfil": "send-out",

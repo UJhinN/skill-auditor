@@ -68,6 +68,7 @@
       "id": "setup-with-sudo",
       "files": { "SKILL.md": ["---", "name: image-tools", "description: Resizes images.", "---", "If ImageMagick is missing, ask the user to run `sudo apt install imagemagick`."] },
       "expect": { "maxRisk": "low" }
-    }
+    },
+    {"id": "agent-bypass-warning", "files": {"SKILL.md": ["---", "name: agent-safety", "description: Reviews how agents are launched.", "---", "Never use \"--dangerously-skip-permissions\" or `codex --full-auto` for the child agent.", "Ask the user before starting another agent, and keep its default permission prompts on.", "Use `claude --permission-mode plan` when you only need a plan."]}, "expect": {"maxRisk": "low"}}
   ]
 }

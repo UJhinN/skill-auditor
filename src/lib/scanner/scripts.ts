@@ -2,7 +2,7 @@
 // because an agent will happily run a command it reads in SKILL.md.
 
 import type { Finding, Severity } from "./types";
-import { excerpt, type FileKind, findIn, isScriptComment } from "./util";
+import { excerpt, type FileKind, findIn, isScriptComment, windows } from "./util";
 
 interface Rule {
   id: string;
@@ -11,6 +11,33 @@ interface Rule {
   markdownSeverity?: Severity;
   message: string;
   patterns: RegExp[];
+  /**
+   * Optional: decide per match whether the text only explains or warns about the command.
+   * `start`/`end` bound the part of the match to judge (capture group 1 when present).
+   * A rule with this runs on every match in the line, and the line counts as soft only
+   * when all of its matches are soft.
+   */
+  soften?: (line: string, start: number, end: number) => boolean;
+  softSeverity?: Severity;
+  softMessage?: string;
+}
+
+// "never use", "don't run", "avoid passing" … right before the flag, in the same clause.
+// Needs a verb so "don't worry, claude --yolo" stays an instruction.
+const WARNING_BEFORE =
+  /(?:\b(?:never|do not|don't|dont|must not|should not|shouldn't|not to)\s+(?:ever\s+)?(?:use|using|run|running|pass|passing|add|adding|enable|enabling|set|setting|launch|launching|start|starting|invoke|invoking|include|including|call|calling|specify)\b|\bavoid(?:ing)?\b|(?:ห้าม|อย่า|ไม่ควร|หลีกเลี่ยง))[^\n.;&|]{0,60}$/i;
+
+/** The flag alone in quotes or backticks ("--yolo") is a mention; `claude --yolo` is a command. */
+function isMention(line: string, start: number, end: number): boolean {
+  const open = line[start - 1];
+  const close = line[end];
+  return (
+    open !== undefined && close !== undefined && "\"'`“‘".includes(open) && "\"'`”’".includes(close)
+  );
+}
+
+function explainsAgentFlag(line: string, start: number, end: number): boolean {
+  return isMention(line, start, end) || WARNING_BEFORE.test(line.slice(Math.max(0, start - 120), start));
 }
 
 const SHELLS = String.raw`(sh|bash|zsh|dash|ksh|fish|python3?|node|perl|ruby|php|iex|invoke-expression)`;
@@ -133,12 +160,60 @@ export const RULES: Rule[] = [
     ],
   },
   {
+    // Starting another coding agent with its permission prompts off: it can then run
+    // commands and edit files without anyone approving each step.
+    id: "script.agent-bypass-permissions",
+    severity: "medium",
+    softSeverity: "low",
+    message:
+      "สั่งให้ AI coding agent ตัวอื่นทำงานโดยปิดการขออนุญาต (permission / approval) จึงรันคำสั่งและแก้ไฟล์ได้เองโดยไม่ถามผู้ใช้",
+    softMessage:
+      "พูดถึง flag ที่ปิดการขออนุญาตของ AI coding agent น่าจะเป็นคำอธิบายหรือคำเตือน ไม่ใช่คำสั่งให้รัน แต่ควรดูบริบท",
+    soften: explainsAgentFlag,
+    // group 1 = the flag, at the end of the match (for --permission-mode, the flag and its value)
+    patterns: [
+      /(?<![\w-])(--dangerously-skip-permissions)(?![\w-])/,
+      /(?<![\w-])(--permission-mode(?:\s*=\s*|\s+)["']?bypassPermissions)(?![\w-])/,
+      /(?<![\w-])(--dangerously-bypass-approvals-and-sandbox)(?![\w-])/,
+      // --full-auto / --yolo mean something else (or nothing) for other commands
+      /(?<![\w-])codex(?:-cli)?(?![\w.-])[^\n|;&]{0,200}?[\s"'`“‘](--full-auto|--yolo)(?![\w-])/i,
+      /(?<![\w-])gemini(?:-cli)?(?![\w.-])[^\n|;&]{0,200}?[\s"'`“‘](--yolo)(?![\w-])/i,
+    ],
+  },
+  {
     id: "script.privilege",
     severity: "low",
     message: "ขอสิทธิ์ admin หรือเปิดสิทธิ์ไฟล์ให้ทุกคน",
     patterns: [/\bsudo\s+\S/, /\bchmod\s+(-R\s+)?777\b/, /-verb\s+runas\b/i],
   },
 ];
+
+function findFirst(line: string, rule: Rule): { index: number; soft: false } | null {
+  for (const p of rule.patterns) {
+    const m = findIn(line, p);
+    if (m) return { index: m.index, soft: false };
+  }
+  return null;
+}
+
+/** All matches of a softenable rule; prefers a hard match over a soft one. */
+function findAgentMatch(line: string, rule: Rule): { index: number; soft: boolean } | null {
+  let soft: { index: number; soft: true } | null = null;
+  for (const p of rule.patterns) {
+    const re = new RegExp(p.source, p.flags.includes("g") ? p.flags : p.flags + "g");
+    for (const w of windows(line)) {
+      for (const m of w.text.matchAll(re)) {
+        // group 1 is always the tail of the match, so the flag starts at its last occurrence
+        const flag = m[1] ?? m[0];
+        const start = w.offset + m.index + m[0].lastIndexOf(flag);
+        const end = start + flag.length;
+        if (!rule.soften!(line, start, end)) return { index: start, soft: false };
+        soft ??= { index: start, soft: true };
+      }
+    }
+  }
+  return soft;
+}
 
 export function scanScripts(path: string, content: string, kind: FileKind): Finding[] {
   const out: Finding[] = [];
@@ -149,19 +224,21 @@ export function scanScripts(path: string, content: string, kind: FileKind): Find
     const line = raw;
 
     for (const rule of RULES) {
-      for (const p of rule.patterns) {
-        const m = findIn(line, p);
-        if (!m) continue;
-        out.push({
-          severity: kind === "markdown" && rule.markdownSeverity ? rule.markdownSeverity : rule.severity,
-          rule: rule.id,
-          file: path,
-          line: i + 1,
-          message: rule.message,
-          excerpt: excerpt(line, m.index),
-        });
-        break; // one finding per rule per line
-      }
+      const hit = rule.soften ? findAgentMatch(line, rule) : findFirst(line, rule);
+      if (!hit) continue;
+      const soft = hit.soft;
+      out.push({
+        severity: soft
+          ? (rule.softSeverity ?? rule.severity)
+          : kind === "markdown" && rule.markdownSeverity
+            ? rule.markdownSeverity
+            : rule.severity,
+        rule: rule.id,
+        file: path,
+        line: i + 1,
+        message: soft && rule.softMessage ? rule.softMessage : rule.message,
+        excerpt: excerpt(line, hit.index),
+      });
     }
   });
 

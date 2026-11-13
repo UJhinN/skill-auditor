@@ -234,6 +234,85 @@ describe("layer B — risky commands", () => {
   });
 });
 
+describe("layer B — AI agents started without permission prompts", () => {
+  const RULE = "script.agent-bypass-permissions";
+  const sev = (path: string, text: string) =>
+    scanOne(path, text).findings.find((f) => f.rule === RULE)?.severity;
+
+  it.each([
+    'claude --permission-mode bypassPermissions --print < "$PROMPT"',
+    "claude -p 'fix the tests' --dangerously-skip-permissions",
+    "claude --permission-mode=bypassPermissions -p hi",
+    'claude --permission-mode "bypassPermissions" -p hi',
+    "codex exec --dangerously-bypass-approvals-and-sandbox 'update deps'",
+    "codex exec --full-auto 'refactor'",
+    "npx @openai/codex --yolo",
+    "gemini --yolo -p 'summarize'",
+    "npx @google/gemini-cli -p 'x' --yolo",
+    "Run `claude --dangerously-skip-permissions` in the repo.",
+  ])("flags medium: %s", (line) => {
+    expect(sev("scripts/run.sh", line)).toBe("medium");
+    expect(sev("SKILL.md", line)).toBe("medium");
+  });
+
+  it("reports the flag line and an excerpt", () => {
+    const f = scanOne("SKILL.md", "Setup.\n\nRun: claude --dangerously-skip-permissions -p go").findings[0];
+    expect(f).toMatchObject({ rule: RULE, line: 3 });
+    expect(f.excerpt).toContain("--dangerously-skip-permissions");
+  });
+
+  it.each([
+    'Never use "--dangerously-skip-permissions" in this skill.',
+    "Never run claude with --dangerously-skip-permissions.",
+    "Do not pass `--permission-mode bypassPermissions` to the child agent.",
+    "Avoid codex --full-auto unless the user asks.",
+    'In gemini, the flag "--yolo" skips every confirmation.',
+    "ห้ามใช้ claude --dangerously-skip-permissions",
+  ])("lowers to low when it only warns: %s", (line) => {
+    expect(sev("SKILL.md", line)).toBe("low");
+  });
+
+  it("keeps a real command medium when a warning is on another sentence or clause", () => {
+    expect(sev("SKILL.md", "Never stop early. claude --dangerously-skip-permissions -p go")).toBe("medium");
+    expect(sev("SKILL.md", "Don't worry, claude --dangerously-skip-permissions -p go")).toBe("medium");
+    expect(sev("SKILL.md", 'Never use "--yolo" alone; run codex exec --full-auto')).toBe("medium");
+  });
+
+  it("does not treat a command in quotes as a mention", () => {
+    expect(sev("scripts/run.sh", 'bash -c "claude --dangerously-skip-permissions -p go"')).toBe("medium");
+  });
+
+  it.each([
+    "codex exec 'fix the build'",
+    "codex --model o3",
+    "claude -p 'fix the build' --permission-mode acceptEdits",
+    "claude --permission-mode plan",
+    "gemini -p 'summarize' --sandbox",
+    // --yolo / --full-auto only count for codex and gemini
+    "mytool --yolo",
+    "rsync --full-auto src dst",
+    "codex exec x; mytool --yolo",
+    "gemini -p x && other --yolo",
+    "claude --yolo",
+    "codex --yolo-ish",
+    "echo permission-mode bypassPermissions",
+    "claude --dangerously-skip-permissions-docs",
+  ])("leaves alone: %s", (line) => {
+    expect(scanOne("scripts/run.sh", line).findings.map((f) => f.rule)).not.toContain(RULE);
+  });
+
+  it("skips commented-out lines in scripts but not in markdown", () => {
+    const line = "# claude --dangerously-skip-permissions -p go";
+    expect(scanOne("scripts/run.sh", line).findings).toEqual([]);
+    expect(sev("SKILL.md", line)).toBe("medium");
+  });
+
+  it("finds the flag deep inside a very long line", () => {
+    const line = "lorem ipsum ".repeat(1000) + "then run: claude --dangerously-skip-permissions -p go";
+    expect(sev("SKILL.md", line)).toBe("medium");
+  });
+});
+
 // Each case below was a false positive or a miss found by `npm run eval` on real skills.
 describe("regressions from the eval", () => {
   it.each([

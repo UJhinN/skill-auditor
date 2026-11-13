@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { githubLink, interpretRecheck, isLegacyReport, type ScanResponse, summarize } from "./report-model";
+import { githubLink, interpretRecheck, isLegacyReport, type ScanResponse, summarize, TOPICS, topicOf } from "./report-model";
 
 const base: ScanResponse = {
   id: "a",
@@ -97,5 +97,12 @@ describe("githubLink", () => {
   it("pins the link to the commit and encodes the path", () => {
     expect(githubLink("o/r", "abc", "dir/a b.md", 7)).toBe("https://github.com/o/r/blob/abc/dir/a%20b.md#L7");
     expect(githubLink("o/r", null, "x.md", null)).toBe("https://github.com/o/r/blob/HEAD/x.md");
+  });
+});
+
+describe("agent-bypass topic", () => {
+  it("groups the permission-bypass rule under its own topic", () => {
+    expect(topicOf("script.agent-bypass-permissions")).toBe("agent-bypass");
+    expect(TOPICS.find((t) => t.id === "agent-bypass")?.title).toBe("สั่ง AI ตัวอื่นให้ทำงานโดยไม่ขออนุญาต");
   });
 });
