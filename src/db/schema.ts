@@ -11,6 +11,7 @@ import {
 // relative import: drizzle-kit loads this file without the @/ alias
 import { SEVERITIES } from "../lib/scanner/types";
 import type { CoverageEntry } from "../lib/github";
+import type { SkillInfo } from "../lib/skill-info";
 
 export const scanStatus = pgEnum("scan_status", [
   "pending",
@@ -35,6 +36,9 @@ export const scans = pgTable(
     error: text("error"), // set when failed
     // which files were read fully / partially / skipped — always shown in the report
     coverage: jsonb("coverage").$type<CoverageEntry[]>(),
+    // what each skill says it does (SKILL.md front matter) + optional Thai summary;
+    // null on scans made before this existed, which are then not reused from the cache
+    skills: jsonb("skills").$type<SkillInfo[]>(),
     // results are only reused for the same commit AND the same rules
     scannerVersion: text("scanner_version"),
     // no auth yet; kept nullable so adding login later needs no migration of old rows

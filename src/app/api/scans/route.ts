@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -54,7 +54,8 @@ export async function POST(request: Request) {
         eq(scans.commitSha, head.commitSha),
         eq(scans.scannerVersion, SCANNER_VERSION),
         or(
-          eq(scans.status, "done"),
+          // a finished scan from before skill descriptions existed is redone, not reused
+          and(eq(scans.status, "done"), isNotNull(scans.skills)),
           and(
             inArray(scans.status, ["pending", "running"]),
             gt(scans.updatedAt, new Date(Date.now() - STALE_AFTER_MS)),

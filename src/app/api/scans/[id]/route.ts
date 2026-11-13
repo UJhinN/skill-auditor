@@ -62,6 +62,8 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/scans/[id]"
       score: scan.score,
       riskLevel: scan.status === "done" ? (rows[0]?.severity ?? "none_found") : null,
       coverage: scan.coverage ?? [],
+      // null = scanned before descriptions were recorded
+      skills: scan.skills ?? null,
       scannerVersion: scan.scannerVersion,
       createdAt: scan.createdAt,
       findings: rows,

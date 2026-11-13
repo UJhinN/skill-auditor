@@ -5,6 +5,27 @@
 
 ---
 
+## อัปเดตโดย Claude (Opus 5.5) เมื่อ 2026-11-13 — บอกว่า skill คืออะไรบนหน้ารายงาน
+
+เจ้าของอยากรู้ว่า skill เกี่ยวกับอะไรโดยไม่ต้องแปลเอง ตอนสแกนจึงอ่าน `name` และ `description` จาก front matter ของ `SKILL.md` ทุกตัว และถ้ามี `GEMINI_API_KEY` จะให้ Gemini สรุปเป็นไทยหนึ่งประโยค (คำขอเดียวต่อ 40 skill, สูงสุด 3 คำขอ, timeout 20 วินาที, รันคู่กับการสแกน) ถ้าไม่มี key หรือ Gemini ใช้ไม่ได้ จะแสดงคำอธิบายต้นฉบับแทน ไม่กระทบผลสแกน ไม่ได้แตะกฎหรือ `SCANNER_VERSION`
+
+- **ความปลอดภัย:** คำอธิบายเป็นข้อความที่ผู้เขียน skill ควบคุม จึงห่อด้วย tag ที่มี nonce บอกโมเดลว่าเป็นข้อมูล รับเฉพาะ id ที่ถาม ตัดเหลือบรรทัดเดียวไม่เกิน 140 ตัวอักษร แปลงอักขระซ่อนให้มองเห็น และ React แสดงเป็นข้อความล้วน ลองกับคำอธิบายที่สั่งให้ตอบว่า "ปลอดภัย 100%" แล้ว Gemini ไม่ทำตาม
+- **ทดสอบจริง:** สรุป 12 คำอธิบายจริงได้ครบใน 7.6 วินาที; สแกน `anthropics/skills` บน dev ได้สรุปครบ 20/20 skill
+- **การ cache:** รายงานที่สแกนก่อนหน้านี้ (`skills` เป็น null) จะไม่ถูกใช้ซ้ำ กด "ตรวจเวอร์ชันล่าสุด" แล้วได้สแกนใหม่ที่มีคำอธิบาย หน้ารายงานเก่าจะบอกให้กดปุ่มนี้
+- **เปิดบนเว็บจริง:** ต้องตั้ง `GEMINI_API_KEY` ใน Vercel การตั้ง key อย่างเดียว**ไม่**เปิด Gemini judge เพราะ judge ใช้ `JUDGE_PROVIDERS` (ค่าเริ่มต้น groq)
+
+| ไฟล์ | ขอบเขตงานของ Claude |
+|---|---|
+| `src/lib/skill-info.ts` (ใหม่) | อ่าน front matter (ไม่ใช้ไลบรารี YAML), prompt สรุป, ตรวจคำตอบ, `getSummarizer()` ที่ใช้ `GeminiJudge.complete` |
+| `src/lib/skill-info.test.ts` (ใหม่) | เทสต์ parser, การตรวจคำตอบ, กรณีล้มเหลว, การแบ่งคำขอ |
+| `src/db/schema.ts`, `drizzle/0003_add_scan_skills.sql` | คอลัมน์ `scans.skills` (jsonb, nullable) — migrate แล้วบนฐานข้อมูลที่ใช้ร่วมกัน |
+| `src/lib/scan-job.ts` | เก็บ `skills` ตอนสแกนเสร็จหรือสแกนไม่ได้ |
+| `src/app/api/scans/route.ts` | ไม่ใช้ผล cache ที่ไม่มี `skills` |
+| `src/app/api/scans/[id]/route.ts` | ส่ง `skills` ให้หน้ารายงาน |
+| `src/app/scans/[id]/report-model.ts` | type `SkillInfo`, `skillTitle()`, ผูกคำอธิบายกับกลุ่มไฟล์ใน `groupBySkill` |
+| `src/app/scans/[id]/report.tsx` | การ์ด "skill นี้คืออะไร" (skill เดียว: สรุปตัวใหญ่ + ต้นฉบับในปุ่มเปิด / หลาย skill: แถวละ skill กดเพื่อดูต้นฉบับ แสดง 6 ตัวแรก) และบรรทัดสรุปใต้ชื่อ skill ในส่วนหลักฐาน |
+| `src/app/scans/[id]/report.test.tsx` | เทสต์การ์ดใหม่ |
+
 ## อัปเดตโดย Claude (Opus 5.5) เมื่อ 2026-11-12 — เก็บกวาดไฟล์ที่ไม่ใช้
 
 - ลบ `docs/report-preview.html` (แบบร่างหน้ารายงาน ทำเป็นหน้าจริงแล้ว) ถ้าต้องการดูให้ใช้ `git show HEAD~1:docs/report-preview.html` หรือ commit ก่อนหน้านี้
@@ -354,7 +375,7 @@ npm run db:generate -- --name <ชื่อ> && npm run db:migrate
 | `DATABASE_URL` | ✅ | ✅ (มาจาก Neon integration) | ห้ามพิมพ์ค่าออกมา |
 | `GROQ_API_KEY` | ✅ | ❌ | ถ้ามีค่า judge จะเปิด |
 | `GROQ_MODEL` (ชื่อเดิม `SCANNER_MODEL` ยังใช้ได้) | — | — | ค่าเริ่มต้นคือ `openai/gpt-oss-120b` |
-| `GEMINI_API_KEY` | ยังไม่มี | ❌ | judge ตัวที่สอง ดูบันทึกของ Claude ด้านบน |
+| `GEMINI_API_KEY` | ยังไม่มี | ❌ | สรุปไทยของคำอธิบาย skill (เปิดเมื่อมี key) และ judge ตัวที่สองถ้าระบุใน `JUDGE_PROVIDERS` ดูบันทึกของ Claude ด้านบน |
 | `GEMINI_MODEL`, `GEMINI_REASONING_EFFORT` | — | — | ค่าเริ่มต้น `gemini-3.5-flash-lite` และไม่ส่ง `reasoning_effort` |
 | `JUDGE_PROVIDERS` | — | — | ลำดับที่ลอง เช่น `groq,gemini` ค่าเริ่มต้น `groq` ตัวเดียว (eval ไม่อ่านค่านี้) |
 | `JUDGE_MAX_INPUT_CHARS` | — | — | ค่าเริ่มต้นของ Groq คือ 14000 (เพราะเพดาน 8K token/นาที) |

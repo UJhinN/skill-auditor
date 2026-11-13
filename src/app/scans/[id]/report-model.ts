@@ -19,6 +19,15 @@ export interface Coverage {
   reason?: string;
 }
 
+/** What a skill says it does, from its SKILL.md front matter (see src/lib/skill-info.ts). */
+export interface SkillInfo {
+  root: string;
+  name: string | null;
+  description: string | null;
+  /** one-line Thai summary written by an LLM, when it was available */
+  summary: string | null;
+}
+
 export interface ScanResponse {
   id: string;
   repo: string;
@@ -30,6 +39,8 @@ export interface ScanResponse {
   riskLevel: RiskLevel | null;
   coverage: Coverage[];
   scannerVersion?: string | null;
+  /** null or missing = scanned before descriptions were recorded */
+  skills?: SkillInfo[] | null;
   findings: Finding[];
 }
 
@@ -153,11 +164,19 @@ export interface SkillGroup {
   fileCount: number;
   /** files of this skill read only in part or skipped */
   incompleteCount: number;
+  /** its SKILL.md description, when the scan recorded one */
+  info?: SkillInfo;
 }
 
 export const OUTSIDE_SKILLS = "ไฟล์นอกโฟลเดอร์ skill";
 
-export function groupBySkill(findings: Finding[], coverage: Coverage[]): SkillGroup[] {
+/** Folder name, or the front matter name for a skill at the repo root. */
+export function skillTitle(info: Pick<SkillInfo, "root" | "name">): string {
+  if (info.root === "") return info.name ?? "skill ที่ราก repo";
+  return info.root.split("/").pop() ?? info.root;
+}
+
+export function groupBySkill(findings: Finding[], coverage: Coverage[], skills: SkillInfo[] = []): SkillGroup[] {
   const roots = coverage
     .filter((c) => c.path === "SKILL.md" || c.path.endsWith("/SKILL.md"))
     .map((c) => (c.path === "SKILL.md" ? "" : c.path.slice(0, -"/SKILL.md".length)))
@@ -170,7 +189,8 @@ export function groupBySkill(findings: Finding[], coverage: Coverage[]): SkillGr
     let g = groups.get(root);
     if (!g) {
       const name = root === null ? OUTSIDE_SKILLS : root === "" ? "skill ที่ราก repo" : (root.split("/").pop() ?? root);
-      g = { root, name, findings: [], top: null, fileCount: 0, incompleteCount: 0 };
+      const info = root === null ? undefined : skills.find((k) => k.root === root);
+      g = { root, name: info ? skillTitle(info) : name, findings: [], top: null, fileCount: 0, incompleteCount: 0, info };
       groups.set(root, g);
     }
     return g;

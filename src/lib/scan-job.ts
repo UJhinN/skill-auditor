@@ -5,6 +5,7 @@ import { fetchSkill, GitHubError, type Head } from "./github";
 import { getJudge, runJudge } from "./judge";
 import { type Finding, scanFiles } from "./scanner";
 import { reveal } from "./scanner/util";
+import { collectSkillInfo, getSummarizer, summarizeSkills } from "./skill-info";
 
 /** A pending/running scan untouched for this long is treated as dead. */
 export const STALE_AFTER_MS = 3 * 60 * 1000;
@@ -21,6 +22,8 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
   try {
     await setStatus(id, { status: "running", step: "กำลังดึงไฟล์จาก GitHub" });
     const fetched = await fetchSkill(repo, head);
+    // runs beside the scan and the judge; never throws, worst case no Thai summaries
+    const skillsInfo = summarizeSkills(collectSkillInfo(fetched.files), getSummarizer());
 
     await setStatus(id, { step: `กำลังสแกน ${fetched.files.length} ไฟล์` });
     const scanned = scanFiles(fetched.files);
@@ -34,6 +37,7 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
       await setStatus(id, {
         status: "failed", step: null, score: null, coverage,
         error: "ข้อมูลไม่เพียงพอสำหรับประเมิน ไม่มีไฟล์ที่ตัวสแกนอ่านเป็นข้อความที่รองรับได้",
+        skills: await skillsInfo,
       });
       return;
     }
@@ -77,6 +81,7 @@ export async function runScan(id: string, repo: string, head: Head): Promise<voi
       step: null,
       score: result.score,
       coverage,
+      skills: await skillsInfo,
     });
   } catch (e) {
     console.error(`scan ${id} (${repo}) failed`, e);

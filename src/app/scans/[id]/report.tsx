@@ -12,6 +12,8 @@ import {
   incompleteReasons,
   interpretRecheck,
   type ScanResponse,
+  type SkillInfo,
+  skillTitle,
   summarize,
 } from "./report-model";
 
@@ -19,6 +21,129 @@ const CARD = "flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground
 const WARNING =
   "rounded-lg bg-amber-100 p-3 text-sm leading-6 text-amber-950 dark:bg-amber-950 dark:text-amber-100";
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+const SHOWN_SKILLS = 6;
+const AI_BADGE = "rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground";
+
+/** Compact row for repos with several skills: name and summary; tap to see the original. */
+function SkillRow({ info }: { info: SkillInfo }) {
+  const line = info.summary ?? info.description ?? "ไม่มีคำอธิบายใน SKILL.md";
+  const body = (
+    <span className="flex min-w-0 flex-col py-2">
+      <span className="font-mono text-sm font-semibold [overflow-wrap:anywhere]">{skillTitle(info)}</span>
+      <span className={`line-clamp-2 text-sm leading-6 [overflow-wrap:anywhere] ${info.description ? "" : "text-muted-foreground"}`}>
+        {line}
+      </span>
+    </span>
+  );
+  if (!info.description) return <li className="min-h-11">{body}</li>;
+  return (
+    <li>
+      <details className="group">
+        <summary className={`flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 ${FOCUS}`}>
+          {body}
+          <span aria-hidden className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">
+            ▾
+          </span>
+        </summary>
+        <p className="mb-2 whitespace-pre-line rounded-lg bg-muted p-3 text-sm leading-6 [overflow-wrap:anywhere]">
+          {info.description}
+        </p>
+      </details>
+    </li>
+  );
+}
+
+/** A repo that is one skill: the summary large, the original behind a toggle. */
+function SkillAboutItem({ info }: { info: SkillInfo }) {
+  return (
+    <li className="flex flex-col gap-1">
+      {info.summary ? (
+        <p className="text-base leading-7">
+          {info.summary}
+          <span className={`ml-2 align-middle ${AI_BADGE}`}>สรุปโดย AI</span>
+        </p>
+      ) : info.description ? (
+        <p className="line-clamp-2 text-sm leading-6 [overflow-wrap:anywhere]">{info.description}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">ไม่มีคำอธิบายใน SKILL.md</p>
+      )}
+      {info.description && (
+        <details className="text-sm">
+          <summary className={`flex min-h-11 cursor-pointer items-center text-muted-foreground ${FOCUS}`}>
+            ดูคำอธิบายเต็ม (ต้นฉบับ)
+          </summary>
+          <p className="whitespace-pre-line rounded-lg bg-muted p-3 leading-6 [overflow-wrap:anywhere]">{info.description}</p>
+        </details>
+      )}
+    </li>
+  );
+}
+
+function SkillAbout({ skills }: { skills: SkillInfo[] | null | undefined }) {
+  if (!skills) {
+    return (
+      <section aria-labelledby="about-heading" className={CARD}>
+        <h2 id="about-heading" className="text-sm font-medium text-muted-foreground">
+          skill นี้คืออะไร
+        </h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          รายงานนี้สร้างก่อนที่ระบบจะเก็บคำอธิบายของ skill กดปุ่ม “ตรวจเวอร์ชันล่าสุด” เพื่อดูว่า skill นี้เกี่ยวกับอะไร
+        </p>
+      </section>
+    );
+  }
+  if (skills.length === 0) return null;
+  if (skills.length === 1) {
+    return (
+      <section aria-labelledby="about-heading" className={CARD}>
+        <h2 id="about-heading" className="text-sm font-medium text-muted-foreground">
+          {`skill นี้คืออะไร · ${skillTitle(skills[0])}`}
+        </h2>
+        <ul>
+          <SkillAboutItem info={skills[0]} />
+        </ul>
+        <p className="text-xs leading-5 text-muted-foreground">
+          มาจากคำอธิบายที่ผู้เขียน skill เขียนไว้ใน SKILL.md ยังไม่ได้ยืนยันว่าทำแบบนั้นจริง ดูหลักฐานด้านล่างประกอบ
+        </p>
+      </section>
+    );
+  }
+  const head = skills.slice(0, SHOWN_SKILLS);
+  const rest = skills.slice(SHOWN_SKILLS);
+  const anySummary = skills.some((k) => k.summary);
+  const LIST = "flex flex-col divide-y divide-foreground/10";
+  return (
+    <section aria-labelledby="about-heading" className={CARD}>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <h2 id="about-heading" className="text-sm font-medium text-muted-foreground">
+          {`skill ใน repo นี้ (${skills.length})`}
+        </h2>
+        {anySummary && <span className={AI_BADGE}>สรุปโดย AI · กดเพื่อดูต้นฉบับ</span>}
+      </div>
+      <ul className={LIST}>
+        {head.map((k) => (
+          <SkillRow key={k.root} info={k} />
+        ))}
+      </ul>
+      {rest.length > 0 && (
+        <details>
+          <summary className={`flex min-h-11 cursor-pointer items-center text-sm text-muted-foreground ${FOCUS}`}>
+            {`ดูอีก ${rest.length} skill`}
+          </summary>
+          <ul className={`${LIST} border-t border-foreground/10`}>
+            {rest.map((k) => (
+              <SkillRow key={k.root} info={k} />
+            ))}
+          </ul>
+        </details>
+      )}
+      <p className="text-xs leading-5 text-muted-foreground">
+        มาจากคำอธิบายที่ผู้เขียน skill เขียนไว้ใน SKILL.md ยังไม่ได้ยืนยันว่าทำแบบนั้นจริง ดูหลักฐานด้านล่างประกอบ
+      </p>
+    </section>
+  );
+}
 
 function ReportHeader({ data, actions }: { data: ScanResponse; actions?: ReactNode }) {
   return (
@@ -241,7 +366,7 @@ export function Report({ id }: { id: string }) {
 
   const s = summarize(data);
   const readFiles = data.coverage.filter((c) => c.status !== "skipped");
-  const skills = groupBySkill(data.findings, data.coverage);
+  const skills = groupBySkill(data.findings, data.coverage, data.skills ?? []);
   const bySkill = skills.length > 1;
   const flagged = skills.filter((g) => g.findings.length > 0);
   const quiet = skills.filter((g) => g.findings.length === 0);
@@ -258,6 +383,8 @@ export function Report({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
       <ReportHeader data={data} actions={actions} />
+
+      <SkillAbout skills={data.skills} />
 
       <section aria-labelledby="summary-heading" className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,22rem)] lg:gap-8`}>
         <div className="flex flex-col gap-3">
@@ -350,6 +477,11 @@ export function Report({ id }: { id: string }) {
                     {`${g.findings.length} จุด · ${g.fileCount} ไฟล์`}
                     {g.incompleteCount > 0 ? ` · ตรวจไม่ครบ ${g.incompleteCount} ไฟล์` : ""}
                   </p>
+                  {(g.info?.summary ?? g.info?.description) && (
+                    <p className="line-clamp-1 w-full text-sm leading-6 [overflow-wrap:anywhere]">
+                      {g.info?.summary ?? g.info?.description}
+                    </p>
+                  )}
                 </div>
               )}
               {byTopic(g.findings).map((t) => (

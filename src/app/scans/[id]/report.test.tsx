@@ -222,3 +222,52 @@ describe("report layout", () => {
     expect(html).toContain("“ตรวจเวอร์ชันล่าสุด”");
   });
 });
+
+describe("what the skill is about", () => {
+  const info = {
+    root: "",
+    name: "pptx",
+    description: "Create and edit PowerPoint decks.",
+    summary: "ช่วยสร้างและแก้ไขไฟล์ PowerPoint",
+  };
+
+  it("shows the Thai summary with the original behind a toggle", () => {
+    const html = render({ ...completed, skills: [info] });
+    expect(html).toContain("skill นี้คืออะไร · pptx");
+    expect(html).toContain("ช่วยสร้างและแก้ไขไฟล์ PowerPoint");
+    expect(html).toContain("สรุปโดย AI");
+    expect(html).toContain("ดูคำอธิบายเต็ม (ต้นฉบับ)");
+    expect(html).toContain("Create and edit PowerPoint decks.");
+  });
+
+  it("falls back to the original description without an AI label", () => {
+    const html = render({ ...completed, skills: [{ ...info, summary: null }] });
+    expect(html).toContain("Create and edit PowerPoint decks.");
+    expect(html).not.toContain("สรุปโดย AI");
+  });
+
+  it("says so when SKILL.md has no description", () => {
+    const html = render({ ...completed, skills: [{ ...info, description: null, summary: null }] });
+    expect(html).toContain("ไม่มีคำอธิบายใน SKILL.md");
+    expect(html).not.toContain("ดูคำอธิบายเต็ม");
+  });
+
+  it("asks for a rescan on reports made before descriptions were kept", () => {
+    expect(render(completed)).toContain("รายงานนี้สร้างก่อนที่ระบบจะเก็บคำอธิบายของ skill");
+    expect(render({ ...completed, skills: null })).toContain("รายงานนี้สร้างก่อนที่ระบบจะเก็บคำอธิบายของ skill");
+  });
+
+  it("lists many skills and folds the rest", () => {
+    const skills = Array.from({ length: 8 }, (_, i) => ({ ...info, root: `skills/s${i}`, summary: `สรุป ${i}` }));
+    const html = render({ ...completed, skills });
+    expect(html).toContain("skill ใน repo นี้ (8)");
+    expect(html).toContain("ดูอีก 2 skill");
+    expect(html).toContain("s7");
+  });
+
+  it("renders description text as plain text, not HTML", () => {
+    const html = render({ ...completed, skills: [{ ...info, summary: null, description: "<img src=x onerror=alert(1)>" }] });
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+});

@@ -22,6 +22,13 @@
       "when": 1794370243532,
       "tag": "0002_add_scan_coverage",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794554961572,
+      "tag": "0003_add_scan_skills",
+      "breakpoints": true
     }
   ]
 }
