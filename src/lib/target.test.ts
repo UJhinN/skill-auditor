@@ -39,6 +39,23 @@ describe("parseTarget", () => {
     expect(parseTarget("npx -y @scope/installer add owner/repo")).toEqual({ repo: "owner/repo" });
   });
 
+  it("reads install instructions written as a sentence", () => {
+    expect(
+      parseTarget(
+        "Follow https://skillsmp.com/skill-install/prompt.md to install only the Agent Skill at https://github.com/openclaw/openclaw/tree/main/.agents/skills/openclaw-docker-e2e-authoring.",
+      ),
+    ).toEqual({
+      repo: "openclaw/openclaw",
+      hint: { kind: "refpath", value: "main/.agents/skills/openclaw-docker-e2e-authoring" },
+    });
+    // a link wins over an earlier word that looks like owner/repo
+    expect(parseTarget("Works with input/output files, see (https://github.com/a/b).")).toEqual({ repo: "a/b" });
+    // in a sentence, the word after the link is not a skill name
+    expect(parseTarget("Get it from https://github.com/a/b then restart")).toEqual({ repo: "a/b" });
+    // punctuation around a plain owner/repo
+    expect(parseTarget("install `a/b`, then run it")).toEqual({ repo: "a/b" });
+  });
+
   it("rejects text without a usable repo, and path tricks", () => {
     for (const bad of ["", "anthropics", "npx skills add", "https://gitlab.com/a/b", "a/b/../../etc", "a/b/./x", "-x/y"]) {
       expect(parseTarget(bad)).toBeNull();

@@ -65,16 +65,26 @@ function fromPlain(token: string): Target | null {
 export function parseTarget(input: string): Target | null {
   const text = input.trim();
   if (!text || text.length > 2000) return null;
-  const tokens = text.split(/\s+/);
+  // Words in a sentence carry punctuation: "(see https://github.com/a/b)." or "`a/b`,".
+  const tokens = text
+    .split(/\s+/)
+    .map((t) => t.replace(/^[("'`“‘<[]+/, "").replace(/[)"'`”’>\].,;:!?]+$/, ""))
+    .filter(Boolean);
+  if (tokens.length === 0) return null;
 
   if (tokens.length === 1) return fromUrl(tokens[0]) ?? fromPlain(tokens[0]);
 
+  // In a sentence or command, a GitHub link is the most reliable signal ("Follow <other
+  // site> to install the skill at https://github.com/…"), so links win over a bare
+  // owner/repo that could just be a word like "and/or".
+  const linkAt = tokens.findIndex((t) => fromUrl(t) !== null);
+
   // A command: the first token that is a GitHub link or owner/repo is the source. npm
   // package names (`skills@latest`, `@scope/pkg`) are not owner/repo, so they are skipped.
-  for (let i = 0; i < tokens.length; i++) {
+  for (let i = linkAt >= 0 ? linkAt : 0; i < tokens.length; i++) {
     const tok = tokens[i];
     if (tok.startsWith("-") || tok.startsWith("@")) continue;
-    const found = fromUrl(tok) ?? (tok.includes("/") ? fromPlain(tok) : null);
+    const found = fromUrl(tok) ?? (tok.includes("/") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(tok) ? fromPlain(tok) : null);
     if (!found) continue;
     if (found.hint) return found;
     // the skill name: after --skill / -s, else the next plain word after the repo
@@ -84,7 +94,9 @@ export function parseTarget(input: string): Target | null {
     if (flag >= 0) name = rest[flag + 1];
     else {
       const eq = rest.find((t) => t.startsWith("--skill="));
-      name = eq ? eq.slice("--skill=".length) : rest.find((t) => !t.startsWith("-"));
+      // "the next word" is the skill only in a command, not in a sentence ("… at <link> then …")
+      const isCommand = /^(?:npx|bunx|pnpx|pnpm|yarn|npm|skills?|skillfish|claude|codex|gemini)$/i.test(tokens[0]);
+      name = eq ? eq.slice("--skill=".length) : isCommand ? rest.find((t) => !t.startsWith("-")) : undefined;
     }
     return name && NAME.test(name) ? { repo: found.repo, hint: { kind: "name", value: name } } : found;
   }
