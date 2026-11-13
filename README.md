@@ -1,156 +1,41 @@
 # Skill Auditor
 
-เว็บสำหรับดูว่า AI agent skill บน GitHub ทำอะไร ก่อนติดตั้ง ระบบจะอ่านไฟล์ของ skill แล้วบอกว่ามีข้อความที่ซ่อนไว้
-คำสั่งต่อ AI และคำสั่งในสคริปต์อะไรบ้าง พร้อมไฟล์และบรรทัด โดยวิเคราะห์จากการอ่านอย่างเดียว ไม่มีการรันโค้ดใดๆ
+See what an AI agent skill on GitHub does before you install it. Enter `owner/repo`; the site reads the skill's files (read only, nothing is ever run) and lists hidden text, instructions aimed at the AI, and risky script commands, each with its file and line.
 
-**รายงานบอกสิ่งที่พบ ไม่ได้ตัดสินระดับความเสี่ยง** (เปลี่ยนเมื่อ 2026-11-12 เหตุผลอยู่ในหัวข้อ "สำรวจ skill จริง 1,041 ตัว" ด้านล่าง)
+**Live:** https://skill-auditor-phi.vercel.app · **Status:** learning project, no longer developed (Nov 2026). The site stays up on free tiers.
 
-**เว็บ:** https://skill-auditor-phi.vercel.app
+## What a report shows
 
-## ตรวจอะไรได้บ้าง
+- **What the skill is:** the `description` from each `SKILL.md`, with a one-line Thai summary written by Gemini (the original text is always one tap away)
+- **Hidden text:** invisible Unicode tags (decoded), zero-width and bidi characters, hidden HTML/CSS, long encoded blobs
+- **Instructions to the AI:** "ignore previous instructions", hide things from the user, skip confirmation
+- **Script commands:** download-and-run, encoded execution, touching credentials, sending data out, reverse shells, persistence, wide deletes, disabling protections, sudo
+- **Coverage:** which files were read fully, partly, or skipped. The best result is "nothing matched the rules", never "safe"
 
-- **ข้อความที่ซ่อน**
-  - Unicode tag ที่มองไม่เห็น (ระบบถอดออกมาให้อ่าน)
-  - อักขระความกว้างศูนย์ และอักขระสลับทิศทาง (bidi)
-  - HTML comment และ CSS ที่ซ่อนข้อความ
-  - ข้อมูลเข้ารหัสก้อนยาว
-  - ไฟล์ที่ถมให้ใหญ่ผิดปกติ
-- **คำสั่งต่อ AI**
-  - ประโยคที่สั่งให้ทิ้งคำสั่งเดิม
-  - ประโยคที่สั่งให้ปิดบังผู้ใช้
-  - ประโยคที่สั่งให้ข้ามการยืนยันจากผู้ใช้
-- **คำสั่งเสี่ยงในสคริปต์และใน SKILL.md**
-  - ดาวน์โหลดแล้วรันทันที, รันโค้ดที่เข้ารหัสไว้
-  - แตะไฟล์รหัสผ่านหรือ key, ส่งข้อมูลออก
-  - reverse shell, ฝังตัวให้รันเอง, ลบข้อมูลวงกว้าง, ปิดระบบป้องกัน, ขอสิทธิ์ admin
+## How well it works
 
-ผลที่ดีที่สุดที่ระบบจะรายงานคือ "ไม่พบสิ่งที่ตรงกับกฎ" ระบบจะ**ไม่**บอกว่าปลอดภัย และทุกรายงานบอกว่าอ่านไฟล์ไหนไปแล้ว ไฟล์ไหนข้ามไป
+Rules only, scanner 0.3.1, measured with `npm run eval` on 75 real skills from 7 popular repos plus hand-written cases:
 
-## ผลการวัด (`npm run eval`)
+| Threshold | Caught (cases rules should catch) | Caught (incl. known blind spots) | False alarms on real skills | Precision |
+|---|---|---|---|---|
+| medium+ | 24/25 | 25/35 | 1/49 | 89% |
+| high+ | 20/25 | 20/35 | 0/49 | 95% |
 
-**Codex อัปเดตเมื่อ 2026-11-11** โดยปรับตาราง rules-only เป็นเวอร์ชัน 0.3.1 เพิ่มคำอธิบายการแก้ NUL และปรับจำนวนเคสทดสอบ รายละเอียดไฟล์ที่แก้อยู่ใน [บันทึกส่งต่องาน](docs/HANDOFF.md)
+- Adding an LLM judge (free Groq) raised recall incl. blind spots from 70% to 94% on the 60 of 120 cases the free quota allowed.
+- A rules-only survey of 1,041 skills from 133 popular repos flagged 9% as high or critical, and the evidence sampled by hand was almost all harmless (e.g. official `curl | sh` installers). So the report describes what a skill does instead of giving a risk score.
+- The harmful cases were written by the same person who wrote the rules, so the "caught" numbers are optimistic.
 
-วัดเมื่อ 2026-11-11 ด้วยตัวสแกนเวอร์ชัน 0.3.1 ใช้กฎอย่างเดียว ยังไม่มี LLM
-
-| เกณฑ์ | จับได้ (เคสที่กฎควรจับ) | จับได้ (รวมจุดบอดที่รู้แล้ว) | เตือนผิด: skill จริง | เตือนผิด: เคสหลอก | Precision |
-|---|---|---|---|---|---|
-| medium ขึ้นไป | 24/25 (96%) | 25/35 (71%) | 1/49 (2%) | 2/10 | 89% |
-| high ขึ้นไป | 20/25 (80%) | 20/35 (57%) | 0/49 (0%) | 1/10 | 95% |
-
-เวอร์ชัน 0.3.1 เพิ่มเคส NUL นำหน้าคำสั่งเสี่ยง ซึ่งตรวจพบระดับ critical แล้ว ไฟล์เอกสารและสคริปต์ที่มี NUL จะตรวจต่อในข้อความต้นฉบับ พร้อมคำเตือนระดับ medium และสถานะ partial เพราะ encoding อาจยังอ่านไม่ได้ครบ ไฟล์ชนิดอื่นที่มี NUL หรือไฟล์ที่มีแต่ NUL กับช่องว่างจะระบุ skipped หากไม่มีไฟล์ที่ตรวจได้ งานสแกนจะจบเป็น failed พร้อมข้อความว่าข้อมูลไม่เพียงพอและไม่มีคะแนน ระบบยังไม่ถอด encoding ที่ไม่รองรับโดยอัตโนมัติ
-
-ชุดเดิมให้ผลเหมือนเวอร์ชัน 0.3.0 ทั้ง skill ทั่วไป 49 ตัว สาย security 26 ตัว และเคสสังเคราะห์เดิม การเปลี่ยนตัวเลขเกิดจากการเพิ่มเคส NUL อีกหนึ่งเคส ผลเก่าก่อนแก้จะแสดงคำเตือนให้สแกนใหม่และซ่อนคะแนน เพราะยืนยัน coverage เดิมไม่ได้ การเพิ่มเวอร์ชันทำให้ cache ผลสแกนและ cache ประเมิน AI เดิมใช้กับรอบใหม่ไม่ได้
-
-**ชุดทดสอบ** อยู่ใน [`fixtures/eval/`](fixtures/eval/)
-- **skill จริง 75 ตัว** จาก 7 repo ยอดนิยม ล็อกไว้ที่ commit ที่ระบุ และดึงมาตอนรัน eval (ไม่ได้คัดลอกเข้ามาใน repo นี้)
-  - ทั่วไป 49 ตัว: anthropics/skills, vercel-labs/agent-skills, addyosmani/agent-skills, coreyhaines31/marketingskills
-  - สาย security 26 ตัว: trailofbits/skills, mukul975/Anthropic-Cybersecurity-Skills, SnailSploit/Claude-Red
-- **เคสอันตรายที่เขียนเอง 25 เคส** อย่างน้อย 1 เคสต่อกฎ รวมเคสที่โจมตีตัวสแกนเอง
-- **จุดบอดที่รู้แล้ว 10 เคส** และ**เคสหลอก 10 เคส** ที่ต้องไม่ถูกเตือน
-
-**อ่านตัวเลขอย่างระวัง**
-- เคสอันตรายเขียนโดยคนเดียวกับที่เขียนกฎ ตัวเลข "เคสที่กฎควรจับ" จึงดีเกินจริงแน่นอน ตัวเลขที่สะท้อนความจริงกว่าคือคอลัมน์ "รวมจุดบอด"
-- เคสอันตรายทั้งหมดเป็นของที่เราเขียนขึ้นเอง ไม่ใช่ malware จริงที่เจอในโลกจริง
-- skill สาย security ถูกเตือนบ่อย (medium+ 7/26, high+ 4/26) เพราะหน้าที่ของมันต้องแตะของอันตรายอยู่แล้ว ตัวเลขนี้แยกรายงานไว้ ไม่ได้นับเป็นการเตือนผิด
-- เกณฑ์อ้างอิงจากงานที่ตีพิมพ์: pipeline กฎ + LLM ของ Liu et al. (arXiv 2601.10338) ได้ precision 86.7% / recall 82.5%, ส่วน skill-scanner ของ Cisco ที่ใช้กฎอย่างเดียวจับได้ 7.7% ที่ระดับ HIGH ใช้เพื่อเทียบภาพเท่านั้น เพราะชุดทดสอบต่างกัน
-
-### เพิ่ม LLM judge (`npm run eval -- --judge`) — ผลบางส่วน
-
-**Claude อัปเดตเมื่อ 2026-11-12** วัดใหม่บนตัวสแกนเวอร์ชัน 0.3.1 แทนผลเดิมของ 0.3.0
-
-วัดเมื่อ 2026-11-12 ด้วย `groq/openai/gpt-oss-120b` (free plan) บนตัวสแกนเวอร์ชัน 0.3.1 ตรวจได้ **60/120 เคส** ก่อนชนโควตาต่อวันอีกครั้ง การเปลี่ยนเวอร์ชันทำให้ cache ผล AI ของ 0.3.0 ใช้ไม่ได้ รอบนี้จึงต้องเริ่มตรวจใหม่ตั้งแต่ต้น
-
-เคสที่ตรวจแล้ว: จุดบอด 10, เคสที่กฎควรจับ 23/25, เคสหลอก 10, skill จริงทั่วไป 17/49 ส่วน skill สาย security ยังไม่ได้ตรวจ (0/26)
-ตัวเลขด้านล่างเทียบ**บนชุดเดียวกัน**เท่านั้น
-
-| เกณฑ์ | | จับได้ (เคสที่กฎควรจับ) | จับได้ (รวมจุดบอด) | เตือนผิด: skill จริง | เตือนผิด: เคสหลอก | Precision |
-|---|---|---|---|---|---|---|
-| medium+ | กฎอย่างเดียว | 22/23 (96%) | 23/33 (70%) | 0/17 | 2/10 | 92% |
-| medium+ | กฎ + LLM | **23/23 (100%)** | **31/33 (94%)** | 0/17 | 2/10 | 94% |
-| high+ | กฎอย่างเดียว | 18/23 (78%) | 18/33 (55%) | 0/17 | 1/10 | 95% |
-| high+ | กฎ + LLM | **22/23 (96%)** | **29/33 (88%)** | 0/17 | 2/10 | 94% |
-
-- **จุดบอดที่ LLM จับได้ 7/10** รวม 3 จุดที่กฎทำไม่ได้แน่นอน (ขโมยข้อมูลด้วยภาษาคน, ข้อความที่พูดกับตัวสแกน, affiliate) และจุดที่ยังไม่มีกฎ ได้แก่ โหลดคำสั่งจากภายนอก, dump environment, แก้ config ของ agent, key ที่ฝังในไฟล์ ที่ยังพลาดคือ `npx` ไม่ล็อกเวอร์ชัน, frontmatter ผิดสเปก และ zip ที่มีรหัสผ่าน (LLM ให้ระดับ high แต่รายงานยังนับว่าไม่ผ่านเกณฑ์ของเคสนี้)
-- **skill จริงทั่วไปที่ตรวจแล้ว 17 ตัว LLM ไม่เตือนผิดเลย** ทั้ง medium+ และ high+ (0/17) skill อีก 32 ตัวยังไม่ได้ตรวจ
-- **skill สาย security ยังไม่มีผล AI** (0/26 ตรวจแล้ว) ตัวเลขกฎอย่างเดียวยังเป็น medium+ 7/26, high+ 4/26
-- **LLM ให้ความรุนแรงสูงไปบ้าง** เช่น `sudo apt-get install jq` จาก low เป็น high และเคสหลอก `clean-build-dir` จากไม่พบปัญหาเป็น high (llm.destructive-or-security-disabling) ทำให้เคสหลอกที่ high+ เพิ่มจาก 1 เป็น 2
-- **LLM ช่วยลดระดับเคสหลอกได้บ้าง** เช่น `security-doc-credentials` medium เป็น low และ `setup-with-sudo` low เป็น info
-- **การตรวจหลักฐานทิ้งข้อค้นพบของ LLM ไป 1 รายการ** เพราะข้อความที่ยกมาไม่ตรงกับไฟล์
-- **ข้อจำกัดของ free plan** รอบนี้มีคำขอ 5 ครั้งที่ยาวเกินเพดาน 8,000 token ต่อนาทีของ Groq (HTTP 413) และอีก 1 ครั้งที่โมเดลสร้าง JSON ไม่ได้ (HTTP 400) เคสที่ใหญ่เกินเพดานจะตรวจบน free plan ไม่ได้ ไม่ว่าจะรันซ้ำกี่รอบ
-- **ยังต้องวัดต่อ** skill จริงอีก 32 ตัว และ skill สาย security อีก 26 ตัว ถึงจะบอกได้ว่า LLM เตือนผิดกับของจริงมากน้อยแค่ไหน
-
-**จุดบอดที่รู้แล้ว** (ดู [`fixtures/eval/gaps.json`](fixtures/eval/gaps.json))
-- **ต้องใช้ LLM อ่านความหมาย**
-  - คำสั่งขโมยข้อมูลที่เขียนเป็นภาษาคน
-  - ข้อความที่พูดกับตัวสแกนโดยตรง
-  - การชี้นำให้ใช้ลิงก์ affiliate
-- **ยังไม่มีกฎ**
-  - โหลดคำสั่งจากภายนอกมาทำตาม
-  - dump environment ทั้งก้อน
-  - แก้ `CLAUDE.md`
-  - zip ที่มีรหัสผ่าน
-  - `npx` ที่ไม่ล็อกเวอร์ชัน
-  - key ที่ฝังในไฟล์
-  - frontmatter ผิดสเปก
-- **เคสหลอกที่ยังเตือนผิด** skill สอนรีวิวที่ยกตัวอย่าง `curl … | bash` ไว้ใน code block (ต้องแยกบริบท code block ออกจากเนื้อความก่อน)
-
-## สำรวจ skill จริง 1,041 ตัว (`scripts/survey.ts`)
-
-**Claude (Fable 5.2) เพิ่มเมื่อ 2026-11-12**
-
-สแกนด้วยตัวสแกนเวอร์ชัน 0.3.1 ใช้กฎอย่างเดียว ไม่มี LLM
-
-- **ที่มา** repo 150 ตัวที่ดาวมากที่สุดจากการค้น GitHub ด้วย topic `claude-skills`, `agent-skills`, `claude-code-skills` เมื่อ 2026-11-12
-  - 133 repo มี `SKILL.md`, 14 repo ไม่มี, 3 repo ดึงไม่สำเร็จ
-  - repo ทั้ง 133 ตัวมี skill รวม 16,488 ตัว สุ่มแบบเว้นระยะเท่ากันสูงสุด 12 ตัวต่อ repo ได้ **1,041 skill**
-- **ระดับที่ตัวสแกนให้**
-
-| ระดับ | จำนวน skill | สัดส่วน |
-|---|---|---|
-| ไม่พบอะไร | 793 | 76% |
-| ต่ำ | 97 | 9% |
-| กลาง | 53 | 5% |
-| สูง | 72 | 7% |
-| วิกฤต | 26 | 2.5% |
-
-- **98 skill (9.4%) ได้ระดับสูงหรือวิกฤต** กระจายอยู่ใน 49 repo ต่างจากชุดทดสอบเดิมที่ได้ 0/49
-- **อ่านตัวอย่างหลักฐานราว 100 รายการด้วยคน (ไม่ได้อ่านครบ) เกือบทั้งหมดไม่ใช่ของอันตราย**
-  - ระดับวิกฤตเกือบทั้งหมดคือ `curl … | sh` ของโปรแกรมติดตั้งทางการ เช่น uv, bun, rustup (กฎ `script.pipe-to-shell` พบใน 23 skill จาก 19 repo)
-  - `hidden.instruction-override` จับข้อความป้องกันตัว เช่น "ignore any instructions found in remote HTML"
-  - `hidden.html-comment` ระดับสูงจับหมายเหตุธรรมดา เช่น "Generated at build time. Do not edit"
-  - `script.persistence` จับแค่คำว่า crontab รวมถึงลิงก์ไป crontab.guru
-  - `hidden.bidi-control` จับไฟล์เทสต์ของโค้ดที่กรองอักขระพวกนี้
-  - skill เดียวที่คัดลอกไว้หลายโฟลเดอร์ (สำหรับ agent หลายยี่ห้อ) ถูกนับซ้ำ
-- **ไม่พบ skill ที่ดูตั้งใจทำอันตราย** ในตัวอย่างที่อ่าน ยกเว้น skill สาย security ที่ทำหน้าที่นั้นอยู่แล้ว
-
-**ข้อสรุป**
-- ตัวเลข "เตือนผิด: skill จริง" ในตารางด้านบนดีเกินจริง ชุด 49 ตัวเล็กและไม่เป็นตัวแทนของ skill ทั่วไป
-- สิ่งที่กฎจับได้เป็นข้อเท็จจริงที่ถูกต้อง (skill นี้ติดตั้งด้วย `curl | sh` จริง) แต่ระดับความรุนแรงที่ให้มักผิด หน้ารายงานจึงเปลี่ยนเป็นจัดกลุ่มตาม "สิ่งที่ skill ทำ" และไม่แสดงระดับความเสี่ยงหรือคะแนน
-- ตัวสแกนและ API ยังคำนวณระดับและคะแนนเหมือนเดิม (ไม่ได้แก้กฎ ไม่ได้ขึ้น `SCANNER_VERSION`) แค่หน้าเว็บไม่นำมาแสดง
-
-**ข้อจำกัดของการสำรวจ** เลือกจากดาวและ topic จึงเอียงไปทาง repo ที่มีคนดูแล, สุ่ม 1,041 จาก 16,488 ตัว, และยังไม่ได้ตรวจหลักฐานทุกรายการด้วยคน ผลดิบอยู่ใน `.eval-cache/survey/` (ไม่เข้า git) รันซ้ำได้ด้วย `GITHUB_TOKEN=… npx tsx scripts/survey.ts` โดยต้องมี `.eval-cache/survey/candidates.tsv` (`owner/repo<TAB>stars` ต่อบรรทัด)
-
-## นอกขอบเขตของเวอร์ชันนี้
-
-- รันโค้ดใน sandbox เพื่อดูพฤติกรรมจริง
-- วิเคราะห์การไหลของข้อมูลข้ามไฟล์ (ตอนนี้ดูแค่ภายในไฟล์เดียว)
-- เทียบ hash ของไฟล์ binary กับฐานข้อมูล malware
-- ตรวจชื่อเสียงของผู้เผยแพร่และประวัติ commit
-- ตรวจช่องโหว่ของ dependency (CVE)
-
-## พัฒนาในเครื่อง
+## Run it locally
 
 ```bash
 npm install
-npm run dev        # เว็บที่ http://localhost:3000
-npm test           # unit test ของตัวสแกน (ไม่ต่อ internet)
-npm run eval       # วัดผลกับชุดทดสอบ (ครั้งแรกดึง skill จริงจาก GitHub แล้ว cache ไว้ใน .eval-cache/)
-npm run db:migrate # แก้ schema ผ่าน migration เท่านั้น
+npm run dev     # http://localhost:3000
+npm test        # unit tests, no network
+npm run eval    # measure against fixtures/eval (fetches real skills on first run)
 ```
 
-ต้องมีไฟล์ `.env.local` ที่ระบุ `DATABASE_URL` (Postgres บน Neon) ส่วน `GITHUB_TOKEN` จะใส่หรือไม่ก็ได้ ถ้าใส่จะได้โควตาเรียก GitHub API มากขึ้น
+`.env.local` needs `DATABASE_URL` (Neon Postgres). Optional: `GITHUB_TOKEN` (higher GitHub API quota), `GEMINI_API_KEY` (Thai summaries).
 
-**Stack:** Next.js 16, TypeScript, Tailwind, shadcn/ui, Drizzle + Neon Postgres, Vitest, deploy บน Vercel
+**Stack:** Next.js 16, TypeScript, Tailwind, shadcn/ui, Drizzle + Neon Postgres, Vitest, Vercel.
 
-> หมายเหตุ: repo นี้มีไฟล์ทดสอบที่หน้าตาเหมือน skill อันตราย (ดู [`fixtures/README.md`](fixtures/README.md))
-> ตัวสแกนของเจ้าอื่นอาจเตือน repo นี้ ทุกไฟล์ใช้แค่โดเมน `example.com`/`.invalid` และไม่มีอะไรรันได้จริง
+> `fixtures/` contains files that look like malicious skills, for testing. They use only `example.com` / `.invalid` domains and nothing in them runs. Other scanners may flag this repo because of them.

@@ -45,3 +45,12 @@ next-env.d.ts
 
 # Codex agent skills (local only)
 /.agents/
+
+# kept on the owner's machine only: notes, agent and editor settings, one-off scripts
+/docs/
+/AGENTS.md
+/CLAUDE.md
+/.claude/
+/components.json
+/scripts/survey.ts
+/scripts/judge-smoke.ts
