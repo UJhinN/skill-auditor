@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { findings, scans } from "@/db/schema";
-import { fetchSkill, GitHubError, type Head } from "./github";
+import { fetchSkill, GitHubError, type Head, type TreeEntry } from "./github";
 import { getJudge, runJudge } from "./judge";
 import { type Finding, scanFiles } from "./scanner";
 import { reveal } from "./scanner/util";
@@ -18,10 +18,16 @@ async function setStatus(id: string, fields: Partial<typeof scans.$inferInsert>)
 }
 
 /** Runs after the POST response has been sent (via `after`). Never throws. */
-export async function runScan(id: string, repo: string, head: Head): Promise<void> {
+export async function runScan(
+  id: string,
+  repo: string,
+  head: Head,
+  /** scan only this folder, from the file list the API already fetched */
+  only?: { dir: string; entries: TreeEntry[] },
+): Promise<void> {
   try {
     await setStatus(id, { status: "running", step: "กำลังดึงไฟล์จาก GitHub" });
-    const fetched = await fetchSkill(repo, head);
+    const fetched = await fetchSkill(repo, head, only);
     // runs beside the scan and the judge; never throws, worst case no Thai summaries
     const skillsInfo = summarizeSkills(collectSkillInfo(fetched.files), getSummarizer());
 

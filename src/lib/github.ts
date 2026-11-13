@@ -8,9 +8,8 @@ import { fileKind } from "./scanner/util";
 const API = "https://api.github.com";
 const RAW = "https://raw.githubusercontent.com";
 
-// owner: GitHub usernames are 1–39 chars of letters, digits and single hyphens.
-// repo: letters, digits, . _ - (but never "." or "..").
-export const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+// owner/repo rule shared with the browser form; see target.ts
+export { REPO_PATTERN } from "./target";
 
 export const LIMITS = {
   // 200 → 400 after the per-skill split: measured on real repos, 100 extra files cost only

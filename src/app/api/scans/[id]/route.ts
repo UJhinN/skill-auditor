@@ -55,6 +55,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/scans/[id]"
     {
       id: scan.id,
       repo: scan.repo,
+      path: scan.path,
       commitSha: scan.commitSha,
       status: scan.status,
       step: scan.step,

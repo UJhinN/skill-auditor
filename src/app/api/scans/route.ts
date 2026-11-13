@@ -1,17 +1,19 @@
-import { and, desc, eq, gt, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { scans } from "@/db/schema";
-import { getHead, GitHubError, REPO_PATTERN } from "@/lib/github";
+import { getHead, getTree, GitHubError, type TreeEntry } from "@/lib/github";
 import { runScan, STALE_AFTER_MS } from "@/lib/scan-job";
 import { SCANNER_VERSION } from "@/lib/scanner";
+import { parseTarget, resolveSkillDir } from "@/lib/target";
 
 // The scan itself runs in after(), which lives as long as this function may.
 export const maxDuration = 60;
 
+// "repo" may be owner/repo, owner/repo/folder, a GitHub link or an install command (see target.ts)
 const Body = z.object({
-  repo: z.string().trim().regex(REPO_PATTERN),
+  repo: z.string().trim().min(1).max(2000),
 });
 
 // Protects the free GitHub quota: at most this many new scans per window, for everyone.
@@ -30,11 +32,12 @@ export async function POST(request: Request) {
     return error(400, "ข้อมูลที่ส่งมาไม่ใช่ JSON");
   }
   const parsed = Body.safeParse(json);
-  if (!parsed.success) {
-    return error(400, "รูปแบบต้องเป็น owner/repo เช่น anthropics/skills");
+  const target = parsed.success ? parseTarget(parsed.data.repo) : null;
+  if (!target) {
+    return error(400, "ไม่พบ repo บน GitHub ในข้อความนี้ ใส่ owner/repo ลิงก์ GitHub หรือคำสั่งติดตั้ง skill");
   }
   // GitHub names are case-insensitive; store one spelling so the cache works.
-  const repo = parsed.data.repo.toLowerCase();
+  const repo = target.repo.toLowerCase();
 
   let head;
   try {
@@ -44,13 +47,36 @@ export async function POST(request: Request) {
     throw e;
   }
 
-  // Same repo, same commit, same rules → reuse the finished result, or join one still in progress.
+  // A single skill: find its folder in the repo's own file list (never trust the pasted path as is).
+  let path: string | null = null;
+  let entries: TreeEntry[] | undefined;
+  if (target.hint) {
+    try {
+      const tree = await getTree(repo, head.treeSha);
+      entries = tree.entries;
+      path = resolveSkillDir(
+        entries.filter((e) => e.type === "blob").map((e) => e.path),
+        target.hint,
+      );
+      if (path === null) {
+        const what = target.hint.kind === "name" ? `skill ชื่อ “${target.hint.value}”` : `โฟลเดอร์ “${target.hint.value}”`;
+        const more = tree.truncated ? " (repo นี้ใหญ่เกินกว่าที่ GitHub ส่งรายชื่อไฟล์มาให้ครบ)" : "";
+        return error(404, `ไม่พบ ${what} ใน ${repo}${more} ลองวางลิงก์โฟลเดอร์ของ skill จาก GitHub แทน`);
+      }
+    } catch (e) {
+      if (e instanceof GitHubError) return error(e.status, e.message);
+      throw e;
+    }
+  }
+
+  // Same repo, same folder, same commit, same rules → reuse the finished result, or join one still in progress.
   const [reuse] = await db
     .select({ id: scans.id, status: scans.status })
     .from(scans)
     .where(
       and(
         eq(scans.repo, repo),
+        path === null ? isNull(scans.path) : eq(scans.path, path),
         eq(scans.commitSha, head.commitSha),
         eq(scans.scannerVersion, SCANNER_VERSION),
         or(
@@ -79,10 +105,10 @@ export async function POST(request: Request) {
 
   const [created] = await db
     .insert(scans)
-    .values({ repo, commitSha: head.commitSha, scannerVersion: SCANNER_VERSION, status: "pending" })
+    .values({ repo, path, commitSha: head.commitSha, scannerVersion: SCANNER_VERSION, status: "pending" })
     .returning({ id: scans.id });
 
-  after(() => runScan(created.id, repo, head));
+  after(() => runScan(created.id, repo, head, path === null || !entries ? undefined : { dir: path, entries }));
 
   return Response.json({ id: created.id, status: "pending", cached: false }, { status: 202 });
 }

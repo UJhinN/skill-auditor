@@ -29,6 +29,8 @@ export const scans = pgTable(
     // random UUID so report links can't be guessed by counting
     id: uuid("id").primaryKey().defaultRandom(),
     repo: text("repo").notNull(), // "owner/name"
+    // folder of one skill (or of a group of skills) inside the repo; null = the whole repo
+    path: text("path"),
     commitSha: text("commit_sha"), // filled in once the repo is fetched
     status: scanStatus("status").notNull().default("pending"),
     step: text("step"), // human-readable progress while running

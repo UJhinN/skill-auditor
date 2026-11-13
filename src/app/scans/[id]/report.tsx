@@ -16,6 +16,7 @@ import {
   skillTitle,
   summarize,
 } from "./report-model";
+import { targetText } from "../../../lib/target"; // relative: the tests run without the @/ alias
 
 const CARD = "flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 sm:p-5";
 const WARNING =
@@ -150,10 +151,16 @@ function ReportHeader({ data, actions }: { data: ScanResponse; actions?: ReactNo
     <header className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
       <div className="min-w-0">
         <h1 className="font-mono text-2xl font-semibold [overflow-wrap:anywhere]">{data.repo}</h1>
+        {data.path && (
+          <p className="font-mono text-sm [overflow-wrap:anywhere]">
+            <span className="text-muted-foreground">เฉพาะโฟลเดอร์ </span>
+            {data.path}
+          </p>
+        )}
         {data.commitSha && (
           <a
             className={`inline-flex min-h-9 items-center font-mono text-sm text-muted-foreground hover:text-foreground ${FOCUS}`}
-            href={`https://github.com/${data.repo}/tree/${data.commitSha}`}
+            href={`https://github.com/${data.repo}/tree/${data.commitSha}${data.path ? `/${data.path}` : ""}`}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -291,7 +298,7 @@ export function Report({ id }: { id: string }) {
       const res = await fetch("/api/scans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo: current.repo }),
+        body: JSON.stringify({ repo: targetText(current.repo, current.path) }),
       });
       const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       const outcome = interpretRecheck(id, res.ok, body);

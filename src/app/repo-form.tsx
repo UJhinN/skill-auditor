@@ -4,18 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
-// Same rule the API enforces: owner/repo only, no URLs (blocks SSRF).
-const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+import { parseTarget } from "@/lib/target";
 
 const EXAMPLES = ["anthropics/skills", "vercel-labs/agent-skills"];
-
-/** Accept a pasted GitHub URL too, and reduce it to owner/repo. */
-function normalize(value: string): string {
-  const v = value.trim().replace(/\.git$/, "");
-  const m = v.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+\/[^/\s#?]+)/i);
-  return m ? m[1] : v;
-}
 
 export function RepoForm() {
   const router = useRouter();
@@ -24,9 +15,9 @@ export function RepoForm() {
   const [busy, setBusy] = useState(false);
 
   async function submit(value: string) {
-    const target = normalize(value);
-    if (!REPO_PATTERN.test(target)) {
-      setMessage("รูปแบบต้องเป็น owner/repo เช่น anthropics/skills");
+    // The same parser runs on the server; this only gives a quick answer for obvious typos.
+    if (!parseTarget(value)) {
+      setMessage("ใส่ owner/repo ลิงก์ GitHub หรือคำสั่งติดตั้ง skill เช่น anthropics/skills");
       return;
     }
     setBusy(true);
@@ -35,7 +26,7 @@ export function RepoForm() {
       const res = await fetch("/api/scans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo: target }),
+        body: JSON.stringify({ repo: value.trim() }),
       });
       const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok || !body.id) {
@@ -60,8 +51,8 @@ export function RepoForm() {
         }}
       >
         <Input
-          aria-label="GitHub repo"
-          placeholder="owner/repo"
+          aria-label="GitHub repo, ลิงก์ หรือคำสั่งติดตั้ง skill"
+          placeholder="owner/repo หรือวางคำสั่งติดตั้ง"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
           className="h-10 font-mono"
@@ -93,6 +84,12 @@ export function RepoForm() {
           </Button>
         ))}
       </div>
+
+      <p className="text-sm leading-6 text-muted-foreground">
+        วางได้ทั้งชื่อ repo, ลิงก์โฟลเดอร์ skill บน GitHub หรือคำสั่งติดตั้งจากหน้าร้าน skill เช่น{" "}
+        <code className="font-mono text-xs [overflow-wrap:anywhere]">npx skills add owner/repo --skill ชื่อ</code>{" "}
+        ระบบจะสแกนเฉพาะ skill นั้น
+      </p>
 
       {message && (
         <p role="alert" className="text-sm text-destructive">

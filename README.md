@@ -1,6 +1,6 @@
 # Skill Auditor
 
-See what an AI agent skill on GitHub does before you install it. Enter `owner/repo`; the site reads the skill's files (read only, nothing is ever run) and lists hidden text, instructions aimed at the AI, and risky script commands, each with its file and line.
+See what an AI agent skill on GitHub does before you install it. Enter `owner/repo`, paste a GitHub folder link, or paste the install command from a skill marketplace (e.g. `npx skills add owner/repo --skill name`) to check just that one skill; the site reads the skill's files (read only, nothing is ever run) and lists hidden text, instructions aimed at the AI, and risky script commands, each with its file and line.
 
 **Live:** https://skill-auditor-phi.vercel.app · **Status:** learning project, no longer developed (Nov 2026). The site stays up on free tiers.
 

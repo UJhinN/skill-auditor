@@ -29,6 +29,13 @@
       "when": 1794554961572,
       "tag": "0003_add_scan_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794559369575,
+      "tag": "0004_add_scan_path",
+      "breakpoints": true
     }
   ]
 }

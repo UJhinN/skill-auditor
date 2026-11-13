@@ -31,6 +31,8 @@ export interface SkillInfo {
 export interface ScanResponse {
   id: string;
   repo: string;
+  /** folder inside the repo when one skill was scanned; null/missing = whole repo */
+  path?: string | null;
   commitSha: string | null;
   status: "pending" | "running" | "done" | "failed";
   step: string | null;
