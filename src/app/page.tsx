@@ -1,10 +1,14 @@
+import { LogoMark } from "@/components/logo";
 import { RepoForm } from "./repo-form";
 
 export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-10 px-4 py-16 sm:py-24">
       <div className="flex flex-col gap-3">
-        <p className="font-mono text-sm text-muted-foreground">skill-auditor</p>
+        <p className="flex items-center gap-2 font-mono text-sm text-muted-foreground">
+          <LogoMark className="size-6 text-foreground" />
+          skill-auditor
+        </p>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           ดูว่า skill ทำอะไร ก่อนติดตั้ง
         </h1>
