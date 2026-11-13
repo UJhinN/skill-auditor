@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  AI_FINDING_BADGE,
+  AI_NOTE,
   byTopic,
   type Coverage,
   type Finding,
@@ -12,6 +14,7 @@ import {
   incompleteReasons,
   INSTRUCTIONS_ONLY_NOTE,
   interpretRecheck,
+  isAiFinding,
   MAX_MERGED,
   mergeUses,
   ruleResultLine,
@@ -329,6 +332,7 @@ function IncompleteList({ items }: { items: Coverage[] }) {
 }
 
 function FindingRow({ f, data, open, shownPath }: { f: Finding; data: ScanResponse; open: boolean; shownPath: string }) {
+  const ai = isAiFinding(f);
   return (
     <details open={open} className="group">
       <summary
@@ -338,8 +342,14 @@ function FindingRow({ f, data, open, shownPath }: { f: Finding; data: ScanRespon
           ▸
         </span>
         <code className="font-mono text-sm [overflow-wrap:anywhere]">{`${shownPath}${f.line ? `:${f.line}` : ""}`}</code>
+        {ai && (
+          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-900 dark:bg-violet-950 dark:text-violet-100">
+            {AI_FINDING_BADGE}
+          </span>
+        )}
       </summary>
       <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
+        {ai && <p className="text-xs leading-5 text-muted-foreground">{AI_NOTE}</p>}
         <p className="text-sm leading-6">{f.message}</p>
         {f.excerpt && (
           // rendered as text only — never as HTML (blocks XSS from scanned files)
@@ -504,7 +514,7 @@ export function Report({ id }: { id: string }) {
       ? usesLine(uses, data.skills?.length ?? 1)
       : s.findingCount === 0
         ? "ไม่พบสิ่งที่ตรงกับกฎ"
-        : `พบ ${s.findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
+        : ruleResultLine(s.ruleCount, s.aiCount);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-5">
@@ -521,8 +531,11 @@ export function Report({ id }: { id: string }) {
           {uses && !s.insufficient && (
             <p className="text-base leading-7">
               <span className="text-muted-foreground">ผลตรวจด้วยกฎ: </span>
-              <strong className="font-semibold">{ruleResultLine(s.findingCount)}</strong>
+              <strong className="font-semibold">{ruleResultLine(s.ruleCount, s.aiCount)}</strong>
             </p>
+          )}
+          {s.ai && !s.insufficient && (
+            <p className="text-sm leading-6 text-muted-foreground">{`AI อ่าน ${s.ai.read} จาก ${s.ai.total} ไฟล์`}</p>
           )}
           {s.insufficient ? (
             <p className="text-sm leading-6 text-muted-foreground">

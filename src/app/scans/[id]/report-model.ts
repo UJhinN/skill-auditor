@@ -21,6 +21,8 @@ export interface Coverage {
   path: string;
   status: "full" | "partial" | "skipped";
   reason?: string;
+  /** whether the AI judge read this file; absent when no judge ran */
+  llm?: "read" | "not_read";
 }
 
 /** What a skill says it does, from its SKILL.md front matter (see src/lib/skill-info.ts). */
@@ -98,6 +100,12 @@ export function isLegacyReport(version: string | null | undefined): boolean {
 export interface ReportSummary {
   level: RiskLevel;
   findingCount: number;
+  /** findings from the pattern rules */
+  ruleCount: number;
+  /** findings the AI judge raised (rule ids starting with "llm.") */
+  aiCount: number;
+  /** files the AI read out of those it could have read; null when it read none (or never ran) */
+  ai: { read: number; total: number } | null;
   severityCounts: Partial<Record<Severity, number>>;
   files: { full: number; partial: number; skipped: number; read: number };
   /** files read only in part, or not at all */
@@ -107,6 +115,24 @@ export interface ReportSummary {
   legacy: boolean;
   showScore: boolean;
 }
+
+/** Findings from the LLM judge carry rule ids like "llm.obfuscation". */
+export function isAiFinding(f: Pick<Finding, "rule">): boolean {
+  return f.rule.startsWith("llm.");
+}
+
+/**
+ * How much of the skill the AI read. Null (show nothing about AI) when no file has an `llm`
+ * mark, or the AI read none of them; otherwise how many of the files it was offered it read.
+ */
+export function aiReading(coverage: Coverage[]): { read: number; total: number } | null {
+  const marked = coverage.filter((c) => c.llm !== undefined);
+  const read = marked.filter((c) => c.llm === "read").length;
+  return read === 0 ? null : { read, total: marked.length };
+}
+
+export const AI_FINDING_BADGE = "AI ตั้งข้อสังเกต · อาจคลาดเคลื่อน";
+export const AI_NOTE = "ข้อความที่ยกมาตรวจแล้วว่ามีอยู่ในไฟล์จริง แต่การตีความมาจาก AI อาจผิดได้";
 
 /** Every number on the report comes from here, from the stored scan result. */
 export function summarize(data: ScanResponse): ReportSummary {
@@ -122,6 +148,9 @@ export function summarize(data: ScanResponse): ReportSummary {
   return {
     level: data.riskLevel ?? "none_found",
     findingCount: data.findings.length,
+    ruleCount: data.findings.filter((f) => !isAiFinding(f)).length,
+    aiCount: data.findings.filter(isAiFinding).length,
+    ai: aiReading(data.coverage),
     severityCounts,
     files,
     incomplete: data.coverage.filter((c) => c.status !== "full"),
@@ -353,7 +382,9 @@ export function topicOf(rule: string): TopicId {
 
 /** Findings split by topic, in display order; topics with nothing are left out. */
 export function byTopic(findings: Finding[]): { topic: Topic; findings: Finding[] }[] {
-  return TOPICS.map((topic) => ({ topic, findings: findings.filter((f) => topicOf(f.rule) === topic.id) })).filter(
+  // inside a topic the rule findings come first, then the AI's (each keeps its own order)
+  const ordered = [...findings.filter((f) => !isAiFinding(f)), ...findings.filter(isAiFinding)];
+  return TOPICS.map((topic) => ({ topic, findings: ordered.filter((f) => topicOf(f.rule) === topic.id) })).filter(
     (t) => t.findings.length > 0,
   );
 }
@@ -413,8 +444,11 @@ export function usesLine(u: SkillUses, skillCount = 1): string {
 }
 
 /** What the rules found, in one short line. Never a verdict. */
-export function ruleResultLine(findingCount: number): string {
-  return findingCount === 0 ? "ไม่พบรูปแบบเสี่ยงที่รู้จัก" : `พบ ${findingCount} จุดที่ควรรู้ก่อนติดตั้ง`;
+export function ruleResultLine(ruleCount: number, aiCount = 0): string {
+  if (aiCount === 0) return ruleCount === 0 ? "ไม่พบรูปแบบเสี่ยงที่รู้จัก" : `พบ ${ruleCount} จุดที่ควรรู้ก่อนติดตั้ง`;
+  return ruleCount === 0
+    ? `ไม่พบรูปแบบเสี่ยงที่รู้จักจากกฎ · AI ตั้งข้อสังเกต ${aiCount} จุด`
+    : `พบ ${ruleCount} จุดจากกฎ · AI ตั้งข้อสังเกตอีก ${aiCount} จุด`;
 }
 
 /**

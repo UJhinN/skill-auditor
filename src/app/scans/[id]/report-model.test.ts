@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  githubLink, INSTRUCTIONS_ONLY, interpretRecheck, isLegacyReport, mergeUses, ruleResultLine,
+  aiReading, byTopic, githubLink, INSTRUCTIONS_ONLY, isAiFinding, interpretRecheck, isLegacyReport, mergeUses, ruleResultLine,
   type ScanResponse, summarize, TOPICS, topicOf, usesLine,
 } from "./report-model";
 
@@ -141,5 +141,36 @@ describe("inventory summary", () => {
     const none = { uses: { ...empty, instructionsOnly: true } };
     expect(mergeUses([none, none])?.instructionsOnly).toBe(true);
     expect(mergeUses([none, a])?.instructionsOnly).toBe(false);
+  });
+});
+
+describe("AI findings and reading", () => {
+  const f = (rule: string) => ({ severity: "low" as const, rule, file: "a", line: 1, message: "m", excerpt: null });
+
+  it("tells AI findings from rule findings and counts them apart", () => {
+    expect(isAiFinding(f("llm.obfuscation"))).toBe(true);
+    expect(isAiFinding(f("script.persistence"))).toBe(false);
+    const s = summarize({ ...base, findings: [f("llm.obfuscation"), f("script.persistence"), f("hidden.html-comment")] });
+    expect([s.ruleCount, s.aiCount, s.findingCount]).toEqual([2, 1, 3]);
+  });
+
+  it("puts rule findings before AI findings inside a topic", () => {
+    const got = byTopic([f("llm.instruction-override"), f("hidden.skip-confirmation"), f("llm.scope-violation"), f("hidden.instruction-override")]);
+    expect(got).toHaveLength(1);
+    expect(got[0].findings.map((x) => x.rule)).toEqual([
+      "hidden.skip-confirmation", "hidden.instruction-override", "llm.instruction-override", "llm.scope-violation",
+    ]);
+  });
+
+  it("reports how much the AI read, or null when it read nothing or never ran", () => {
+    expect(aiReading([{ path: "a", status: "full" }])).toBeNull();
+    expect(aiReading([{ path: "a", status: "full", llm: "not_read" }])).toBeNull();
+    expect(aiReading([{ path: "a", status: "full", llm: "read" }, { path: "b", status: "full", llm: "not_read" }, { path: "c", status: "skipped" }])).toEqual({ read: 1, total: 2 });
+  });
+
+  it("words the counts without a verdict", () => {
+    expect(ruleResultLine(3, 2)).toBe("พบ 3 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 2 จุด");
+    expect(ruleResultLine(0, 2)).toBe("ไม่พบรูปแบบเสี่ยงที่รู้จักจากกฎ · AI ตั้งข้อสังเกต 2 จุด");
+    expect(ruleResultLine(3)).toBe("พบ 3 จุดที่ควรรู้ก่อนติดตั้ง");
   });
 });

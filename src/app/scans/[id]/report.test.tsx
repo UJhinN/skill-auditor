@@ -431,3 +431,81 @@ describe("what the skill uses", () => {
     expect(html).toContain("skill นี้คืออะไร");
   });
 });
+
+describe("AI findings kept apart from rule findings", () => {
+  const rule = (over: object = {}) => finding({ rule: "script.pipe-to-shell", file: "scripts/a.sh", ...over });
+  const ai = (over: object = {}) =>
+    finding({ rule: "llm.instruction-override", severity: "medium", file: "SKILL.md", line: 7, message: "AI พบคำสั่งให้ข้ามการยืนยัน", excerpt: "skip confirmation", ...over });
+  const read = [{ path: "SKILL.md", status: "full", llm: "read" }, { path: "scripts/a.sh", status: "full", llm: "read" }];
+  const unread = read.map((c) => ({ ...c, llm: "not_read" }));
+  const BADGE = "AI ตั้งข้อสังเกต · อาจคลาดเคลื่อน";
+  const NOTE = "ข้อความที่ยกมาตรวจแล้วว่ามีอยู่ในไฟล์จริง แต่การตีความมาจาก AI อาจผิดได้";
+  const count = (html: string, text: string) => html.split(text).length - 1;
+
+  it("rule findings only: no AI badge, note or counts", () => {
+    const html = render({ ...completed, riskLevel: "high", coverage: unread, findings: [rule(), rule({ line: 20 })] });
+    expect(html).toContain("พบ 2 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(html).not.toContain("AI");
+    expect(html).not.toContain(BADGE);
+    expect(html).not.toContain(NOTE);
+  });
+
+  it("AI findings only: badge and note on each, counted as AI, none from rules", () => {
+    const html = render({ ...completed, riskLevel: "medium", coverage: read, findings: [ai(), ai({ line: 9 })] });
+    expect(count(html, BADGE)).toBe(2);
+    expect(count(html, NOTE)).toBe(2);
+    expect(html).toContain("ไม่พบรูปแบบเสี่ยงที่รู้จักจากกฎ · AI ตั้งข้อสังเกต 2 จุด");
+    expect(html).toContain("AI อ่าน 2 จาก 2 ไฟล์");
+    expect(html).not.toContain("ไม่พบสิ่งที่ตรงกับกฎ");
+  });
+
+  it("mixed: counts them separately and lists rule findings before AI ones in a topic", () => {
+    // both land in the same topic ("ai-instruction") so the order inside it is what is tested
+    const html = render({
+      ...completed,
+      riskLevel: "high",
+      coverage: read,
+      findings: [
+        ai({ rule: "llm.instruction-override", message: "จาก AI ก่อน" }),
+        finding({ rule: "hidden.instruction-override", file: "SKILL.md", line: 3, message: "จากกฎ" }),
+        rule({ message: "คำสั่งรันจากกฎ" }),
+      ],
+    });
+    expect(html).toContain("พบ 2 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 1 จุด");
+    expect(count(html, BADGE)).toBe(1);
+    expect(html.indexOf("จากกฎ")).toBeLessThan(html.indexOf("จาก AI ก่อน"));
+    // the badge belongs to the AI row only
+    const aiRow = html.slice(html.lastIndexOf("<details", html.indexOf("จาก AI ก่อน")));
+    expect(aiRow.slice(0, aiRow.indexOf(BADGE) + 1)).toContain("SKILL.md:7");
+    expect(html.slice(0, html.indexOf("จากกฎ"))).not.toContain(BADGE);
+  });
+
+  it("AI did not read the files, or no llm marks at all: nothing about AI", () => {
+    for (const coverage of [unread, [{ path: "SKILL.md", status: "full" }, { path: "scripts/a.sh", status: "full" }]]) {
+      const html = render({ ...completed, riskLevel: "high", coverage, findings: [rule()] });
+      expect(html).not.toMatch(/AI อ่าน/);
+      expect(html).not.toContain(BADGE);
+    }
+  });
+
+  it("AI read only some files: says how many", () => {
+    const some = [read[0], { ...read[1], llm: "not_read" }, { path: "ref.md", status: "full", llm: "not_read" }];
+    const html = render({ ...completed, riskLevel: "high", coverage: some, findings: [rule(), ai()] });
+    expect(html).toContain("AI อ่าน 1 จาก 3 ไฟล์");
+  });
+
+  it("keeps AI text as plain text", () => {
+    const html = render({ ...completed, riskLevel: "medium", coverage: read, findings: [ai({ excerpt: "<img src=x onerror=1>", message: "<b>x</b>" })] });
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("also separates them in the inventory headline layout", () => {
+    const html = render({
+      ...completed, riskLevel: "high", coverage: read, findings: [rule(), ai()],
+      skills: [{ root: "", name: "s", description: "d", summary: null, uses: { programs: ["git"], sites: [], secrets: [], envVars: [], paths: [], instructionsOnly: false } }],
+    });
+    expect(html).toContain("ใช้ 1 โปรแกรม");
+    expect(html).toContain("พบ 1 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 1 จุด");
+  });
+});
