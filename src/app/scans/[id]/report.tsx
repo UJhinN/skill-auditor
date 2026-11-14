@@ -24,18 +24,159 @@ import {
   type SkillUses,
   skillTitle,
   summarize,
+  topicOf,
   USES_GROUPS,
   usesLine,
 } from "./report-model";
 import { targetText } from "../../../lib/target"; // relative: the tests run without the @/ alias
 
-const CARD = "flex flex-col gap-3 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 sm:p-5";
+const CARD =
+  "rise flex flex-col gap-3 rounded-2xl bg-card/90 p-4 shadow-sm ring-1 ring-foreground/10 backdrop-blur-sm sm:p-5";
 const WARNING =
   "rounded-lg bg-amber-100 p-3 text-sm leading-6 text-amber-950 dark:bg-amber-950 dark:text-amber-100";
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 const SHOWN_SKILLS = 6;
 const AI_BADGE = "rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground";
+
+/** Stagger the cards' entrance a little; the CSS turns it off for reduced motion. */
+const delay = (i: number) => ({ animationDelay: `${i * 60}ms` });
+
+const TILES: { key: keyof Omit<SkillUses, "instructionsOnly">; label: string }[] = [
+  { key: "programs", label: "โปรแกรม" },
+  { key: "sites", label: "เว็บที่อ้างถึง" },
+  { key: "secrets", label: "ความลับ" },
+  { key: "envVars", label: "ตัวแปร" },
+  { key: "paths", label: "นอกโปรเจค" },
+];
+
+/** Five numbers a reader can take in at a glance; each jumps to the full list. */
+function UsesTiles({ uses, skillCount }: { uses: SkillUses; skillCount: number }) {
+  return (
+    <ul aria-label={usesLine(uses, skillCount)} className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+      {TILES.map((t) => {
+        const n = uses[t.key].length;
+        const hot = t.key === "secrets" && n > 0;
+        return (
+          <li key={t.key}>
+            <a
+              href="#uses-heading"
+              className={`flex min-h-16 flex-col justify-center rounded-xl px-3 py-2 ring-1 transition-colors ${FOCUS} ${
+                hot
+                  ? "bg-brand-soft ring-brand/40 hover:ring-brand"
+                  : n > 0
+                    ? "bg-muted/60 ring-foreground/10 hover:ring-foreground/30"
+                    : "ring-foreground/5 text-muted-foreground"
+              }`}
+            >
+              <span className="text-2xl leading-8 font-bold tabular-nums">{n}</span>
+              <span className="text-xs leading-4">{t.label}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Topics as bars, longest first, so the shape of the evidence shows before the details. */
+function TopicBars({ topics }: { topics: ReturnType<typeof byTopic> }) {
+  const max = Math.max(...topics.map((t) => t.findings.length), 1);
+  return (
+    <ul className="flex flex-col gap-2 text-sm leading-6">
+      {[...topics]
+        .sort((a, b) => b.findings.length - a.findings.length)
+        .map((t) => (
+          <li key={t.topic.id}>
+            <a href={`#topic-${t.topic.id}`} className={`group block rounded-md ${FOCUS}`}>
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="group-hover:underline">{t.topic.title}</span>
+                <span className="text-muted-foreground tabular-nums">{`${t.findings.length} จุด`}</span>
+              </span>
+              <span aria-hidden className="mt-1 block h-1.5 rounded-full bg-muted">
+                <span
+                  className="block h-full rounded-full bg-foreground/70 group-hover:bg-brand"
+                  style={{ width: `${Math.max(6, (t.findings.length / max) * 100)}%` }}
+                />
+              </span>
+            </a>
+          </li>
+        ))}
+    </ul>
+  );
+}
+
+/** One bar split into read / partly read / skipped. */
+function CoverageMeter({ full, partial, skipped }: { full: number; partial: number; skipped: number }) {
+  const total = full + partial + skipped;
+  if (total === 0) return null;
+  const pct = (n: number) => `${(n / total) * 100}%`;
+  return (
+    <div aria-hidden className="flex h-2.5 overflow-hidden rounded-full bg-muted">
+      <span className="bg-emerald-500 dark:bg-emerald-400" style={{ width: pct(full) }} />
+      <span className="bg-brand" style={{ width: pct(partial) }} />
+      <span className="bg-foreground/20" style={{ width: pct(skipped) }} />
+    </div>
+  );
+}
+
+const STEPS = ["รอคิว", "ดึงไฟล์จาก GitHub", "สแกนไฟล์", "เขียนรายงาน"];
+
+/** The scan job reports its step as Thai text; map it onto a fixed list of stages. */
+function stageOf(step: string | null): number {
+  if (!step) return 0;
+  if (step.includes("GitHub")) return 1;
+  if (step.includes("สแกน")) return 2;
+  if (step.includes("AI")) return 3;
+  return 1;
+}
+
+function ScanProgress({ step }: { step: string | null }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const at = stageOf(step);
+  return (
+    <section className={CARD} aria-live="polite">
+      <div className="flex items-center gap-3">
+        <span aria-hidden className="size-5 animate-spin rounded-full border-2 border-foreground/15 border-t-brand" />
+        <p role="status" className="font-medium">
+          {step ?? "รอคิวสแกน…"}
+        </p>
+        <span className="ml-auto text-sm text-muted-foreground tabular-nums">{`${seconds} วิ`}</span>
+      </div>
+      <ol className="grid grid-cols-4 gap-2 text-xs">
+        {STEPS.map((label, i) => (
+          <li key={label} className="flex flex-col gap-1.5">
+            <span
+              aria-hidden
+              className={`h-1.5 rounded-full ${i < at ? "bg-foreground/70" : i === at ? "animate-pulse bg-brand" : "bg-muted"}`}
+            />
+            <span className={i <= at ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="text-sm leading-6 text-muted-foreground">
+        ส่วนใหญ่เสร็จใน 10–40 วินาที repo ที่มีหลายร้อยไฟล์อาจนานกว่านั้น ปิดหน้านี้แล้วกลับมาเปิดลิงก์เดิมได้
+      </p>
+    </section>
+  );
+}
+
+function LoadingSkeleton() {
+  const bar = "animate-pulse rounded-lg bg-muted";
+  return (
+    <div className="flex flex-col gap-4" aria-busy="true">
+      <p className="sr-only">กำลังโหลด…</p>
+      <div className={`${bar} h-8 w-2/3`} />
+      <div className={`${bar} h-4 w-1/3`} />
+      <div className={`${bar} h-28`} />
+      <div className={`${bar} h-48`} />
+    </div>
+  );
+}
 
 
 /**
@@ -111,8 +252,8 @@ function UsesCard({ skills }: { skills: SkillInfo[] | null | undefined }) {
   if (!skills || skills.length === 0) return null; // SkillAbout already explains old reports
   const uses = mergeUses(skills);
   return (
-    <section aria-labelledby="uses-heading" className={CARD}>
-      <h2 id="uses-heading" className="text-lg font-semibold">
+    <section aria-labelledby="uses-heading" className={`${CARD} scroll-mt-4`} style={delay(3)}>
+      <h2 id="uses-heading" className="scroll-mt-4 text-lg font-semibold">
         skill นี้ใช้อะไรบ้าง
       </h2>
       {uses ? (
@@ -228,18 +369,44 @@ function SkillAbout({ skills }: { skills: SkillInfo[] | null | undefined }) {
       </section>
     );
   }
-  const head = skills.slice(0, SHOWN_SKILLS);
-  const rest = skills.slice(SHOWN_SKILLS);
+  return <SkillList skills={skills} />;
+}
+
+function SkillList({ skills }: { skills: SkillInfo[] }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? skills.filter((k) =>
+        [k.root, k.name ?? "", k.summary ?? "", k.description ?? ""].some((v) => v.toLowerCase().includes(q)),
+      )
+    : skills;
+  const head = q ? matches : skills.slice(0, SHOWN_SKILLS);
+  const rest = q ? [] : skills.slice(SHOWN_SKILLS);
   const anySummary = skills.some((k) => k.summary);
   const LIST = "flex flex-col divide-y divide-foreground/10";
   return (
-    <section aria-labelledby="about-heading" className={CARD}>
+    <section aria-labelledby="about-heading" className={CARD} style={delay(1)}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h2 id="about-heading" className="text-sm font-medium text-muted-foreground">
           {`skill ใน repo นี้ (${skills.length})`}
         </h2>
         {anySummary && <span className={AI_BADGE}>สรุปโดย AI · กดเพื่อดูต้นฉบับ</span>}
       </div>
+      {skills.length > SHOWN_SKILLS && (
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="ค้นหา skill ตามชื่อหรือคำอธิบาย"
+          aria-label="ค้นหา skill"
+          className={`h-11 w-full rounded-lg border border-input bg-background px-3 text-sm ${FOCUS}`}
+        />
+      )}
+      {q && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {matches.length > 0 ? `พบ ${matches.length} skill` : "ไม่พบ skill ที่ตรงกับคำค้น"}
+        </p>
+      )}
       <ul className={LIST}>
         {head.map((k) => (
           <SkillRow key={k.root} info={k} />
@@ -380,6 +547,7 @@ export function Report({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState("");
+  const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [navigating, startNavigation] = useTransition();
   const router = useRouter();
 
@@ -411,8 +579,17 @@ export function Report({ id }: { id: string }) {
     };
   }, [id]);
 
-  if (loadError) return <p className="text-destructive">{loadError}</p>;
-  if (!data) return <p className="text-muted-foreground">กำลังโหลด…</p>;
+  if (loadError) {
+    return (
+      <section className={CARD}>
+        <p role="alert" className="font-medium text-destructive">
+          {loadError}
+        </p>
+        <p className="text-sm text-muted-foreground">ลิงก์อาจพิมพ์ผิด หรือรายงานถูกลบไปแล้ว ลองสแกนใหม่จากหน้าแรก</p>
+      </section>
+    );
+  }
+  if (!data) return <LoadingSkeleton />;
 
   // The button asks the same API as the home page. It answers with this very report when
   // the commit and the rules are unchanged, and with a new scan otherwise.
@@ -444,6 +621,15 @@ export function Report({ id }: { id: string }) {
   }
 
   async function copyLink() {
+    // Phones get the system share sheet (LINE, Messenger…); elsewhere the link is copied.
+    if (typeof navigator.share === "function" && window.matchMedia("(pointer: coarse)").matches) {
+      try {
+        await navigator.share({ title: `Skill Auditor · ${data?.repo ?? ""}`, url: window.location.href });
+        return;
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return; // the user closed the sheet
+      }
+    }
     try {
       await navigator.clipboard.writeText(window.location.href);
       setNote("");
@@ -462,7 +648,7 @@ export function Report({ id }: { id: string }) {
         {busy ? "กำลังตรวจ…" : "ตรวจเวอร์ชันล่าสุด"}
       </Button>
       <Button type="button" variant="outline" className="h-11 w-full" onClick={copyLink}>
-        {copied ? "คัดลอกแล้ว" : "คัดลอกลิงก์รายงาน"}
+        {copied ? "คัดลอกแล้ว ✓" : "แชร์ลิงก์รายงาน"}
       </Button>
       <p role="status" aria-live="polite" className="text-sm leading-6 text-muted-foreground">
         {statusText}
@@ -474,9 +660,7 @@ export function Report({ id }: { id: string }) {
     return (
       <div className="flex flex-col gap-4">
         <ReportHeader data={data} />
-        <p role="status" className="animate-pulse">
-          {data.step ?? "รอคิวสแกน…"}
-        </p>
+        <ScanProgress step={data.step} />
       </div>
     );
   }
@@ -505,14 +689,24 @@ export function Report({ id }: { id: string }) {
   const quietIncomplete = quiet.filter((g) => g.incompleteCount > 0).length;
   const total = data.coverage.length;
   const topics = byTopic(data.findings);
+  // each topic's first block gets the id the summary bars link to
+  const anchored = new Set<string>();
+  const anchorFor = (topic: string) => {
+    if (anchored.has(topic)) return undefined;
+    anchored.add(topic);
+    return `topic-${topic}`;
+  };
   const firstFinding = flagged[0] ? byTopic(flagged[0].findings)[0]?.findings[0] : undefined;
   // Reports made before the inventory existed have no `uses`: they keep the old headline.
   const uses = mergeUses(data.skills ?? []);
+  const skillCount = data.skills?.length ?? 1;
+  // The rule result leads; the inventory sits right under it as numbers. Reports made before
+  // the inventory existed keep their old wording.
   const headline = s.insufficient
     ? "ข้อมูลไม่เพียงพอสำหรับประเมิน"
-    : uses
-      ? usesLine(uses, data.skills?.length ?? 1)
-      : s.findingCount === 0
+    : uses?.instructionsOnly && s.findingCount === 0
+      ? usesLine(uses, skillCount)
+      : !uses && s.findingCount === 0
         ? "ไม่พบสิ่งที่ตรงกับกฎ"
         : ruleResultLine(s.ruleCount, s.aiCount);
 
@@ -522,18 +716,22 @@ export function Report({ id }: { id: string }) {
 
       <SkillAbout skills={data.skills} />
 
-      <section aria-labelledby="summary-heading" className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,22rem)] lg:gap-8`}>
-        <div className="flex flex-col gap-3">
-          <h2 id="summary-heading" className="text-sm font-medium text-muted-foreground">
-            สิ่งที่ skill นี้ทำ
-          </h2>
-          <p className="text-2xl leading-tight font-bold sm:text-3xl">{headline}</p>
-          {uses && !s.insufficient && (
-            <p className="text-base leading-7">
-              <span className="text-muted-foreground">ผลตรวจด้วยกฎ: </span>
-              <strong className="font-semibold">{ruleResultLine(s.ruleCount, s.aiCount)}</strong>
-            </p>
-          )}
+      <section
+        aria-labelledby="summary-heading"
+        className={`${CARD} lg:grid lg:grid-cols-[1fr_minmax(0,20rem)] lg:gap-8`}
+        style={delay(2)}
+      >
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 id="summary-heading" className="text-sm font-medium text-muted-foreground">
+              สิ่งที่ skill นี้ทำ
+            </h2>
+            {uses && !s.insufficient && !uses.instructionsOnly && (
+              <p className="text-xs font-medium tracking-wide text-muted-foreground">ผลตรวจด้วยกฎ</p>
+            )}
+            <p className="text-2xl leading-tight font-bold text-balance sm:text-3xl">{headline}</p>
+          </div>
+          {uses && !s.insufficient && !uses.instructionsOnly && <UsesTiles uses={uses} skillCount={skillCount} />}
           {s.ai && !s.insufficient && (
             <p className="text-sm leading-6 text-muted-foreground">{`AI อ่าน ${s.ai.read} จาก ${s.ai.total} ไฟล์`}</p>
           )}
@@ -550,14 +748,7 @@ export function Report({ id }: { id: string }) {
               {bySkill && (
                 <p className="text-sm text-muted-foreground">{`อยู่ใน ${flagged.length} จาก ${skills.length} กลุ่มไฟล์`}</p>
               )}
-              <ul className="flex flex-col gap-1 text-sm leading-6">
-                {topics.map((t) => (
-                  <li key={t.topic.id} className="flex items-baseline justify-between gap-3">
-                    <span>{t.topic.title}</span>
-                    <span className="text-muted-foreground tabular-nums">{`${t.findings.length} จุด`}</span>
-                  </li>
-                ))}
-              </ul>
+              <TopicBars topics={topics} />
               <p className="text-sm leading-6 text-muted-foreground">
                 รายงานนี้บอกว่า skill ทำอะไร ไม่ได้ตัดสินว่าอันตรายหรือไม่ หลายข้อเป็นเรื่องปกติของงานบางประเภท
                 อ่านหลักฐานด้านล่างแล้วตัดสินใจเอง
@@ -576,16 +767,20 @@ export function Report({ id }: { id: string }) {
             ขอบเขตการตรวจ
           </h3>
           {total > 0 && <p className="text-base font-semibold">{`อ่านครบ ${s.files.full} จาก ${total} ไฟล์`}</p>}
+          <CoverageMeter full={s.files.full} partial={s.files.partial} skipped={s.files.skipped} />
           <dl className="grid grid-cols-3 gap-2 text-center">
             {(
               [
-                ["อ่านครบ", s.files.full],
-                ["อ่านบางส่วน", s.files.partial],
-                ["ข้าม", s.files.skipped],
+                ["อ่านครบ", s.files.full, "bg-emerald-500 dark:bg-emerald-400"],
+                ["อ่านบางส่วน", s.files.partial, "bg-brand"],
+                ["ข้าม", s.files.skipped, "bg-foreground/20"],
               ] as const
-            ).map(([label, n]) => (
+            ).map(([label, n, dot]) => (
               <div key={label} className="rounded-lg bg-muted p-2">
-                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dt className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                  <span aria-hidden className={`size-2 rounded-full ${dot}`} />
+                  {label}
+                </dt>
                 <dd className="m-0 text-xl font-bold">{n}</dd>
               </div>
             ))}
@@ -608,14 +803,43 @@ export function Report({ id }: { id: string }) {
 
       <UsesCard skills={data.skills} />
 
-      <section aria-labelledby="findings-heading" className={`${CARD} gap-5`}>
+      <section aria-labelledby="findings-heading" className={`${CARD} scroll-mt-4 gap-5`} style={delay(4)}>
         <h2 id="findings-heading" className="text-lg font-semibold">
           {`หลักฐาน (${s.findingCount})`}
         </h2>
+        {topics.length > 1 && (
+          <div
+            role="group"
+            aria-label="กรองตามหัวข้อ"
+            className="-mx-4 -mt-2 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+          >
+            {[{ id: null, title: "ทั้งหมด", n: s.findingCount }, ...topics.map((t) => ({ id: t.topic.id, title: t.topic.title, n: t.findings.length }))].map(
+              (t) => {
+                const on = topicFilter === t.id;
+                return (
+                  <button
+                    key={t.id ?? "all"}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setTopicFilter(t.id)}
+                    className={`min-h-9 shrink-0 rounded-full px-3 text-sm whitespace-nowrap ring-1 transition-colors ring-inset ${FOCUS} ${
+                      on ? "bg-foreground text-background ring-foreground" : "ring-foreground/15 hover:ring-foreground/40"
+                    }`}
+                  >
+                    {t.title}
+                    <span className={`ml-1.5 tabular-nums ${on ? "opacity-70" : "text-muted-foreground"}`}>{t.n}</span>
+                  </button>
+                );
+              },
+            )}
+          </div>
+        )}
         {s.findingCount === 0 ? (
           <p className="text-sm leading-6 text-muted-foreground">ไม่พบรายการที่ตรงกับกฎที่รู้จัก</p>
         ) : (
-          flagged.map((g) => (
+          flagged
+            .filter((g) => !topicFilter || g.findings.some((f) => topicOf(f.rule) === topicFilter))
+            .map((g) => (
             <div key={g.root ?? "(outside)"} className="flex flex-col gap-3">
               {bySkill && (
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-foreground/10 pb-2">
@@ -631,8 +855,14 @@ export function Report({ id }: { id: string }) {
                   )}
                 </div>
               )}
-              {byTopic(g.findings).map((t) => (
-                <div key={t.topic.id} className="flex flex-col gap-2">
+              {byTopic(g.findings)
+                .filter((t) => !topicFilter || t.topic.id === topicFilter)
+                .map((t) => (
+                <div
+                  key={t.topic.id}
+                  id={anchorFor(t.topic.id)}
+                  className="flex scroll-mt-4 flex-col gap-2"
+                >
                   <div>
                     <h4 className="text-sm font-semibold">{`${t.topic.title} (${t.findings.length})`}</h4>
                     <p className="text-sm leading-6 text-muted-foreground">{t.topic.note}</p>
@@ -675,7 +905,7 @@ export function Report({ id }: { id: string }) {
         )}
       </section>
 
-      <section id="coverage" aria-labelledby="files-heading" className={`${CARD} scroll-mt-4`}>
+      <section id="coverage" aria-labelledby="files-heading" className={`${CARD} scroll-mt-4`} style={delay(5)}>
         <h2 id="files-heading" className="text-lg font-semibold">
           {s.incomplete.length > 0 ? "ไฟล์ที่อ่านบางส่วนหรือข้าม" : "ไฟล์ที่ตรวจ"}
         </h2>

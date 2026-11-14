@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseTarget } from "@/lib/target";
 
-const EXAMPLES = ["anthropics/skills", "vercel-labs/agent-skills"];
+// one example of each kind of input the box accepts; tapping one fills the box and scans it
+const EXAMPLES: { label: string; value: string }[] = [
+  { label: "owner/repo", value: "anthropics/skills" },
+  { label: "ลิงก์โฟลเดอร์ GitHub", value: "https://github.com/anthropics/skills/tree/main/skills/pptx" },
+  { label: "คำสั่งติดตั้ง", value: "npx skills add vercel-labs/agent-skills --skill web-design-guidelines" },
+];
 
 export function RepoForm() {
   const router = useRouter();
@@ -45,6 +50,7 @@ export function RepoForm() {
     <div className="flex flex-col gap-3">
       <form
         className="flex flex-col gap-2 sm:flex-row"
+        aria-busy={busy}
         onSubmit={(e) => {
           e.preventDefault();
           submit(repo);
@@ -55,41 +61,44 @@ export function RepoForm() {
           placeholder="owner/repo หรือวางคำสั่งติดตั้ง"
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          className="h-10 font-mono"
+          className="h-12 bg-background font-mono text-base sm:text-sm"
           autoComplete="off"
           spellCheck={false}
           disabled={busy}
         />
-        <Button type="submit" className="h-10 px-5" disabled={busy}>
+        <Button type="submit" className="h-12 gap-2 px-6 text-base" disabled={busy}>
+          {busy && (
+            <span aria-hidden className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          )}
           {busy ? "กำลังเริ่ม…" : "สแกน"}
         </Button>
       </form>
 
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <span>ลองดู:</span>
-        {EXAMPLES.map((ex) => (
-          <Button
-            key={ex}
-            type="button"
-            variant="outline"
-            size="sm"
-            className="font-mono"
-            disabled={busy}
-            onClick={() => {
-              setRepo(ex);
-              submit(ex);
-            }}
-          >
-            {ex}
-          </Button>
-        ))}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-sm text-muted-foreground">
+          วางได้ทั้งชื่อ repo, ลิงก์ GitHub, คำสั่ง <code className="font-mono text-xs">npx …</code> หรือ install prompt
+          จากหน้าร้าน skill · ลองกดตัวอย่าง:
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          {EXAMPLES.map((ex) => (
+            <li key={ex.label}>
+              <button
+                type="button"
+                disabled={busy}
+                title={ex.value}
+                onClick={() => {
+                  setRepo(ex.value);
+                  submit(ex.value);
+                }}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-sm ring-1 ring-foreground/10 transition-colors hover:ring-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+              >
+                <span aria-hidden className="size-1.5 rounded-full bg-brand" />
+                {ex.label}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
-
-      <p className="text-sm leading-6 text-muted-foreground">
-        วางได้ทั้งชื่อ repo, ลิงก์โฟลเดอร์ skill บน GitHub หรือคำสั่งติดตั้งจากหน้าร้าน skill เช่น{" "}
-        <code className="font-mono text-xs [overflow-wrap:anywhere]">npx skills add owner/repo --skill ชื่อ</code>{" "}
-        ระบบจะสแกนเฉพาะ skill นั้น
-      </p>
 
       {message && (
         <p role="alert" className="text-sm text-destructive">

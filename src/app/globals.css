@@ -2,7 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* dark mode follows the device setting (no toggle to keep in sync) */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 @theme inline {
   --color-background: var(--background);
@@ -19,6 +20,8 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
@@ -73,6 +76,10 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
+  /* the amber of the logo's pupil */
+  --brand: oklch(0.769 0.188 70.08);
+  --brand-soft: oklch(0.962 0.059 95.617);
+  --dot: oklch(0 0 0 / 7%);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -83,7 +90,11 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
+@media (prefers-color-scheme: dark) {
+:root {
+  --brand: oklch(0.769 0.188 70.08);
+  --brand-soft: oklch(0.279 0.077 45.635);
+  --dot: oklch(1 0 0 / 7%);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -116,6 +127,7 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
+}
 
 @layer base {
   * {
@@ -123,8 +135,28 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* faint dot grid with a warm glow at the top, like a lens over paper */
+    background-image:
+      radial-gradient(60rem 24rem at 50% -8rem, color-mix(in oklch, var(--brand) 14%, transparent), transparent 70%),
+      radial-gradient(var(--dot) 1px, transparent 1px);
+    background-size: 100% 100%, 22px 22px;
+    background-repeat: no-repeat, repeat;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 35%, transparent);
   }
   html {
     @apply font-sans;
   }
 }
+/* cards rise in once; nothing moves for people who ask for less motion */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.35s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .rise, .animate-pulse, .animate-spin { animation: none !important; }
+  html { scroll-behavior: auto !important; }
+}
+html { scroll-behavior: smooth; }

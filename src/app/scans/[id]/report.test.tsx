@@ -286,13 +286,14 @@ describe("what the skill uses", () => {
     return start === -1 ? "" : html.slice(start);
   };
 
-  it("leads with what the skill uses, then the rule result", () => {
+  it("leads with the rule result, then what the skill uses as numbers", () => {
     const html = render({ ...completed, skills: [info] });
-    expect(html).toContain("ใช้ 3 โปรแกรม · อ้างถึง 6 เว็บ · แตะความลับ 1 ตัว");
     expect(html).toContain("ผลตรวจด้วยกฎ");
     expect(html).toContain("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
     expect(html).not.toContain("ไม่พบสิ่งที่ตรงกับกฎ");
-    expect(html.indexOf("ใช้ 3 โปรแกรม")).toBeLessThan(html.indexOf("ไม่พบรูปแบบเสี่ยงที่รู้จัก"));
+    // the tiles carry the whole inventory line for screen readers
+    expect(html).toContain('aria-label="ใช้ 3 โปรแกรม · อ้างถึง 6 เว็บ · แตะความลับ 1 ตัว"');
+    expect(html.indexOf("ไม่พบรูปแบบเสี่ยงที่รู้จัก")).toBeLessThan(html.indexOf('aria-label="ใช้ 3 โปรแกรม'));
   });
 
   it("keeps the note that rules cannot read natural language and never says safe", () => {
