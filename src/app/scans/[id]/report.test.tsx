@@ -271,3 +271,241 @@ describe("what the skill is about", () => {
     expect(html).toContain("&lt;img");
   });
 });
+
+describe("what the skill uses", () => {
+  const empty = { programs: [], sites: [], secrets: [], envVars: [], paths: [], instructionsOnly: false };
+  const uses = {
+    ...empty,
+    programs: ["git", "npm", "docker"],
+    sites: ["github.com", "docs.dev", "a.dev", "b.dev", "c.dev", "d.dev"],
+    secrets: ["VERCEL_TOKEN"],
+  };
+  const info = { root: "", name: "deploy", description: "Deploys.", summary: null, uses };
+  const inside = (html: string, heading: string) => {
+    const start = html.indexOf(heading);
+    return start === -1 ? "" : html.slice(start);
+  };
+
+  it("leads with what the skill uses, then the rule result", () => {
+    const html = render({ ...completed, skills: [info] });
+    expect(html).toContain("ใช้ 3 โปรแกรม · อ้างถึง 6 เว็บ · แตะความลับ 1 ตัว");
+    expect(html).toContain("ผลตรวจด้วยกฎ");
+    expect(html).toContain("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
+    expect(html).not.toContain("ไม่พบสิ่งที่ตรงกับกฎ");
+    expect(html.indexOf("ใช้ 3 โปรแกรม")).toBeLessThan(html.indexOf("ไม่พบรูปแบบเสี่ยงที่รู้จัก"));
+  });
+
+  it("keeps the note that rules cannot read natural language and never says safe", () => {
+    const html = render({ ...completed, skills: [info] });
+    expect(html).toContain("ไม่ได้แปลว่าปลอดภัย");
+    expect(html).not.toMatch(/(?<!ไม่ได้แปลว่า)ปลอดภัย/);
+  });
+
+  it("shows the findings summary after the inventory when rules matched", () => {
+    const html = render({ ...completed, riskLevel: "high", skills: [info], findings: [finding(), finding({ line: 20 })] });
+    expect(html).toContain("ใช้ 3 โปรแกรม");
+    expect(html).toContain("พบ 2 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(html).not.toContain("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
+    expect(html).toContain("หลักฐาน (2)");
+  });
+
+  it("says plainly that a skill with no commands is only advice for the AI", () => {
+    const html = render({ ...completed, skills: [{ ...info, uses: { ...empty, instructionsOnly: true } }] });
+    expect(html).toContain("skill นี้มีแต่คำแนะนำให้ AI ไม่มีคำสั่งให้รันโปรแกรม");
+    expect(html).toContain("ตัวสแกนอ่านไม่ได้");
+    expect(html).toContain("ไม่ได้แปลว่าปลอดภัย");
+    expect(html).not.toContain("โปรแกรมที่สั่งรัน");
+  });
+
+  it("has a card with the five groups, each as monospace chips, and hides empty groups", () => {
+    const html = render({
+      ...completed,
+      skills: [{ ...info, uses: { ...uses, envVars: ["PORT"], paths: ["~/.codex"] } }],
+    });
+    const card = inside(html, "skill นี้ใช้อะไรบ้าง");
+    for (const title of ["โปรแกรมที่สั่งรัน", "เว็บที่อ้างถึง", "ความลับที่ใช้", "ตัวแปรอื่น", "ไฟล์/โฟลเดอร์นอกโปรเจค"]) {
+      expect(card).toContain(title);
+    }
+    expect(card).toMatch(/<li class="[^"]*font-mono[^"]*">docker<\/li>/);
+    expect(card).toContain("~/.codex");
+    expect(card).toContain("VERCEL_TOKEN");
+    const html2 = render({ ...completed, skills: [{ ...info, uses: { ...empty, programs: ["git"] } }] });
+    expect(inside(html2, "skill นี้ใช้อะไรบ้าง")).not.toContain("เว็บที่อ้างถึง");
+  });
+
+  it("gives secrets a neutral note and does not call sites contacted", () => {
+    const card = inside(render({ ...completed, skills: [info] }), "skill นี้ใช้อะไรบ้าง");
+    expect(card).toContain("เป็นเรื่องปกติของหลายเครื่องมือ");
+    expect(card).toContain("ดูว่ามันถูกส่งไปที่ไหน");
+    expect(card).toContain("ไม่ได้แปลว่า skill ติดต่อเว็บนั้นจริง");
+  });
+
+  it("shows the first 8 chips and folds the rest behind a toggle", () => {
+    const programs = Array.from({ length: 11 }, (_, i) => `tool${String.fromCharCode(97 + i)}`);
+    const card = inside(render({ ...completed, skills: [{ ...info, uses: { ...empty, programs } }] }), "skill นี้ใช้อะไรบ้าง");
+    expect(card).toContain("ดูทั้งหมด (11)");
+    const [visible, folded] = card.split("<details");
+    for (const p of programs.slice(0, 8)) expect(visible).toContain(`>${p}<`);
+    for (const p of programs.slice(8)) {
+      expect(visible).not.toContain(`>${p}<`);
+      expect(folded).toContain(`>${p}<`);
+    }
+  });
+
+  it("shows no toggle when everything fits", () => {
+    const card = inside(render({ ...completed, skills: [{ ...info, uses: { ...empty, programs: ["git", "npm"] } }] }), "skill นี้ใช้อะไรบ้าง");
+    expect(card).not.toContain("ดูทั้งหมด");
+  });
+
+  it("shows sites as plain text, never as links", () => {
+    const html = render({ ...completed, skills: [{ ...info, uses: { ...empty, sites: ["evil.dev", "docs.dev"] } }] });
+    expect(html).toContain("evil.dev");
+    expect(html).not.toMatch(/<a [^>]*evil\.dev/);
+    expect(html).not.toMatch(/href="[^"]*(evil|docs)\.dev/);
+  });
+
+  it("prints inventory values as text, never as HTML", () => {
+    const html = render({ ...completed, skills: [{ ...info, uses: { ...empty, programs: ["<img src=x onerror=alert(1)>"] } }] });
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("puts a count line on each skill row and the full inventory inside the expanded row", () => {
+    const skills = [
+      { ...info, root: "skills/a", name: "a", uses },
+      { ...info, root: "skills/b", name: "b", description: null, uses: { ...empty, instructionsOnly: true } },
+      { ...info, root: "skills/c", name: "c", description: "C", uses: undefined },
+    ];
+    const html = render({
+      ...completed,
+      coverage: skills.map((k) => ({ path: `${k.root}/SKILL.md`, status: "full" })),
+      skills,
+    });
+    const about = html.slice(html.indexOf("skill ใน repo นี้ (3)"), html.indexOf("skill นี้ใช้อะไรบ้าง"));
+    expect(about).toContain("ใช้ 3 โปรแกรม · อ้างถึง 6 เว็บ · แตะความลับ 1 ตัว");
+    expect(about).toContain("skill นี้มีแต่คำแนะนำให้ AI ไม่มีคำสั่งให้รันโปรแกรม");
+    // the groups sit inside the row's <details>, so a closed row stays compact
+    const row = about.slice(about.indexOf("<details"), about.indexOf("</details>"));
+    expect(row).toContain("โปรแกรมที่สั่งรัน");
+    expect(row).toContain("VERCEL_TOKEN");
+  });
+
+  it("merges several skills into one headline and card", () => {
+    const skills = [
+      { ...info, root: "skills/a", name: "a", uses: { ...empty, programs: ["git", "npm"] } },
+      { ...info, root: "skills/b", name: "b", uses: { ...empty, programs: ["git", "docker"], secrets: ["API_KEY"] } },
+    ];
+    const html = render({ ...completed, skills });
+    expect(html).toContain("ใช้ 3 โปรแกรม · แตะความลับ 1 ตัว");
+    expect(html).toContain("รวมจาก 2 skill");
+  });
+
+  it("still renders a report made before the inventory existed", () => {
+    const html = render({ ...completed, skills: [{ root: "", name: "old", description: "Old.", summary: null }] });
+    expect(html).toContain("ไม่พบสิ่งที่ตรงกับกฎ");
+    expect(html).toContain("รายงานนี้สร้างก่อนที่ระบบจะสรุปสิ่งที่ skill ใช้");
+    expect(html).toContain("“ตรวจเวอร์ชันล่าสุด”");
+    expect(html).not.toContain("โปรแกรมที่สั่งรัน");
+    expect(html).toContain("ไม่ได้แปลว่าปลอดภัย");
+  });
+
+  it("still says there is not enough data when nothing was read, whatever the inventory says", () => {
+    const html = render({ ...completed, coverage: [], skills: [info] });
+    expect(html).toContain("ข้อมูลไม่เพียงพอสำหรับประเมิน");
+    expect(html).not.toContain("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
+  });
+
+  it("keeps coverage, evidence and the old-report warning alongside the inventory", () => {
+    const html = render({
+      ...completed,
+      scannerVersion: "0.3.0",
+      riskLevel: "high",
+      skills: [info],
+      findings: [finding()],
+      coverage: [{ path: "SKILL.md", status: "full" }, { path: "big.md", status: "partial", reason: "ไฟล์ใหญ่" }],
+    });
+    expect(html).toContain("รายงานรุ่นเก่า");
+    expect(html).toContain("ขอบเขตการตรวจ");
+    expect(html).toContain("หลักฐาน (1)");
+    expect(html).toContain("ตรวจไม่ครบ");
+    expect(html).toContain("skill นี้คืออะไร");
+  });
+});
+
+describe("AI findings kept apart from rule findings", () => {
+  const rule = (over: object = {}) => finding({ rule: "script.pipe-to-shell", file: "scripts/a.sh", ...over });
+  const ai = (over: object = {}) =>
+    finding({ rule: "llm.instruction-override", severity: "medium", file: "SKILL.md", line: 7, message: "AI พบคำสั่งให้ข้ามการยืนยัน", excerpt: "skip confirmation", ...over });
+  const read = [{ path: "SKILL.md", status: "full", llm: "read" }, { path: "scripts/a.sh", status: "full", llm: "read" }];
+  const unread = read.map((c) => ({ ...c, llm: "not_read" }));
+  const BADGE = "AI ตั้งข้อสังเกต · อาจคลาดเคลื่อน";
+  const NOTE = "ข้อความที่ยกมาตรวจแล้วว่ามีอยู่ในไฟล์จริง แต่การตีความมาจาก AI อาจผิดได้";
+  const count = (html: string, text: string) => html.split(text).length - 1;
+
+  it("rule findings only: no AI badge, note or counts", () => {
+    const html = render({ ...completed, riskLevel: "high", coverage: unread, findings: [rule(), rule({ line: 20 })] });
+    expect(html).toContain("พบ 2 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(html).not.toContain("AI");
+    expect(html).not.toContain(BADGE);
+    expect(html).not.toContain(NOTE);
+  });
+
+  it("AI findings only: badge and note on each, counted as AI, none from rules", () => {
+    const html = render({ ...completed, riskLevel: "medium", coverage: read, findings: [ai(), ai({ line: 9 })] });
+    expect(count(html, BADGE)).toBe(2);
+    expect(count(html, NOTE)).toBe(2);
+    expect(html).toContain("ไม่พบรูปแบบเสี่ยงที่รู้จักจากกฎ · AI ตั้งข้อสังเกต 2 จุด");
+    expect(html).toContain("AI อ่าน 2 จาก 2 ไฟล์");
+    expect(html).not.toContain("ไม่พบสิ่งที่ตรงกับกฎ");
+  });
+
+  it("mixed: counts them separately and lists rule findings before AI ones in a topic", () => {
+    // both land in the same topic ("ai-instruction") so the order inside it is what is tested
+    const html = render({
+      ...completed,
+      riskLevel: "high",
+      coverage: read,
+      findings: [
+        ai({ rule: "llm.instruction-override", message: "จาก AI ก่อน" }),
+        finding({ rule: "hidden.instruction-override", file: "SKILL.md", line: 3, message: "จากกฎ" }),
+        rule({ message: "คำสั่งรันจากกฎ" }),
+      ],
+    });
+    expect(html).toContain("พบ 2 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 1 จุด");
+    expect(count(html, BADGE)).toBe(1);
+    expect(html.indexOf("จากกฎ")).toBeLessThan(html.indexOf("จาก AI ก่อน"));
+    // the badge belongs to the AI row only
+    const aiRow = html.slice(html.lastIndexOf("<details", html.indexOf("จาก AI ก่อน")));
+    expect(aiRow.slice(0, aiRow.indexOf(BADGE) + 1)).toContain("SKILL.md:7");
+    expect(html.slice(0, html.indexOf("จากกฎ"))).not.toContain(BADGE);
+  });
+
+  it("AI did not read the files, or no llm marks at all: nothing about AI", () => {
+    for (const coverage of [unread, [{ path: "SKILL.md", status: "full" }, { path: "scripts/a.sh", status: "full" }]]) {
+      const html = render({ ...completed, riskLevel: "high", coverage, findings: [rule()] });
+      expect(html).not.toMatch(/AI อ่าน/);
+      expect(html).not.toContain(BADGE);
+    }
+  });
+
+  it("AI read only some files: says how many", () => {
+    const some = [read[0], { ...read[1], llm: "not_read" }, { path: "ref.md", status: "full", llm: "not_read" }];
+    const html = render({ ...completed, riskLevel: "high", coverage: some, findings: [rule(), ai()] });
+    expect(html).toContain("AI อ่าน 1 จาก 3 ไฟล์");
+  });
+
+  it("keeps AI text as plain text", () => {
+    const html = render({ ...completed, riskLevel: "medium", coverage: read, findings: [ai({ excerpt: "<img src=x onerror=1>", message: "<b>x</b>" })] });
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("also separates them in the inventory headline layout", () => {
+    const html = render({
+      ...completed, riskLevel: "high", coverage: read, findings: [rule(), ai()],
+      skills: [{ root: "", name: "s", description: "d", summary: null, uses: { programs: ["git"], sites: [], secrets: [], envVars: [], paths: [], instructionsOnly: false } }],
+    });
+    expect(html).toContain("ใช้ 1 โปรแกรม");
+    expect(html).toContain("พบ 1 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 1 จุด");
+  });
+});

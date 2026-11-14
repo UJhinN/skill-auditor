@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { githubLink, interpretRecheck, isLegacyReport, type ScanResponse, summarize, TOPICS, topicOf } from "./report-model";
+import {
+  aiReading, byTopic, githubLink, INSTRUCTIONS_ONLY, isAiFinding, interpretRecheck, isLegacyReport, mergeUses, ruleResultLine,
+  type ScanResponse, summarize, TOPICS, topicOf, usesLine,
+} from "./report-model";
 
 const base: ScanResponse = {
   id: "a",
@@ -104,5 +107,70 @@ describe("agent-bypass topic", () => {
   it("groups the permission-bypass rule under its own topic", () => {
     expect(topicOf("script.agent-bypass-permissions")).toBe("agent-bypass");
     expect(TOPICS.find((t) => t.id === "agent-bypass")?.title).toBe("สั่ง AI ตัวอื่นให้ทำงานโดยไม่ขออนุญาต");
+  });
+});
+
+describe("inventory summary", () => {
+  const empty = { programs: [], sites: [], secrets: [], envVars: [], paths: [], instructionsOnly: false };
+
+  it("names only the groups that have something", () => {
+    expect(usesLine({ ...empty, programs: ["a", "b", "c"], sites: ["x", "y"], secrets: ["T"] })).toBe(
+      "ใช้ 3 โปรแกรม · อ้างถึง 2 เว็บ · แตะความลับ 1 ตัว",
+    );
+    expect(usesLine({ ...empty, programs: ["a"] })).toBe("ใช้ 1 โปรแกรม");
+    expect(usesLine({ ...empty, envVars: ["P"], paths: ["~/.x", "/etc/y"] })).toBe("ตัวแปรอื่น 1 ตัว · อ้างถึงที่นอกโปรเจค 2 ที่");
+  });
+
+  it("says a skill with no commands is only advice", () => {
+    expect(usesLine({ ...empty, instructionsOnly: true })).toBe(INSTRUCTIONS_ONLY);
+    expect(usesLine({ ...empty, instructionsOnly: true }, 4)).toContain("ทั้ง 4 ตัว");
+  });
+
+  it("words the rule result without a verdict", () => {
+    expect(ruleResultLine(0)).toBe("ไม่พบรูปแบบเสี่ยงที่รู้จัก");
+    expect(ruleResultLine(3)).toBe("พบ 3 จุดที่ควรรู้ก่อนติดตั้ง");
+    expect(ruleResultLine(0)).not.toContain("ปลอดภัย");
+  });
+
+  it("merges skills: union, shared items first, null when nothing was recorded", () => {
+    expect(mergeUses([{}, { uses: null }])).toBeNull();
+    const a = { uses: { ...empty, programs: ["git", "npm"] } };
+    const b = { uses: { ...empty, programs: ["docker", "git"], instructionsOnly: false } };
+    expect(mergeUses([a])).toBe(a.uses);
+    expect(mergeUses([a, b, {}])?.programs).toEqual(["git", "docker", "npm"]);
+    const none = { uses: { ...empty, instructionsOnly: true } };
+    expect(mergeUses([none, none])?.instructionsOnly).toBe(true);
+    expect(mergeUses([none, a])?.instructionsOnly).toBe(false);
+  });
+});
+
+describe("AI findings and reading", () => {
+  const f = (rule: string) => ({ severity: "low" as const, rule, file: "a", line: 1, message: "m", excerpt: null });
+
+  it("tells AI findings from rule findings and counts them apart", () => {
+    expect(isAiFinding(f("llm.obfuscation"))).toBe(true);
+    expect(isAiFinding(f("script.persistence"))).toBe(false);
+    const s = summarize({ ...base, findings: [f("llm.obfuscation"), f("script.persistence"), f("hidden.html-comment")] });
+    expect([s.ruleCount, s.aiCount, s.findingCount]).toEqual([2, 1, 3]);
+  });
+
+  it("puts rule findings before AI findings inside a topic", () => {
+    const got = byTopic([f("llm.instruction-override"), f("hidden.skip-confirmation"), f("llm.scope-violation"), f("hidden.instruction-override")]);
+    expect(got).toHaveLength(1);
+    expect(got[0].findings.map((x) => x.rule)).toEqual([
+      "hidden.skip-confirmation", "hidden.instruction-override", "llm.instruction-override", "llm.scope-violation",
+    ]);
+  });
+
+  it("reports how much the AI read, or null when it read nothing or never ran", () => {
+    expect(aiReading([{ path: "a", status: "full" }])).toBeNull();
+    expect(aiReading([{ path: "a", status: "full", llm: "not_read" }])).toBeNull();
+    expect(aiReading([{ path: "a", status: "full", llm: "read" }, { path: "b", status: "full", llm: "not_read" }, { path: "c", status: "skipped" }])).toEqual({ read: 1, total: 2 });
+  });
+
+  it("words the counts without a verdict", () => {
+    expect(ruleResultLine(3, 2)).toBe("พบ 3 จุดจากกฎ · AI ตั้งข้อสังเกตอีก 2 จุด");
+    expect(ruleResultLine(0, 2)).toBe("ไม่พบรูปแบบเสี่ยงที่รู้จักจากกฎ · AI ตั้งข้อสังเกต 2 จุด");
+    expect(ruleResultLine(3)).toBe("พบ 3 จุดที่ควรรู้ก่อนติดตั้ง");
   });
 });

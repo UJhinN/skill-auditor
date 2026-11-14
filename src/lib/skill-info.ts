@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { DEFAULT_GEMINI_MODEL, GeminiJudge } from "./judge/gemini";
 import { extractJson } from "./judge/index";
+import { inventory, type SkillUses } from "./inventory";
 import type { SkillFile } from "./scanner";
 import { reveal } from "./scanner/util";
 
@@ -19,6 +20,11 @@ export interface SkillInfo {
   description: string | null;
   /** one-line Thai summary of the description, written by an LLM */
   summary: string | null;
+  /**
+   * What the skill uses (programs, sites, secrets …), from its own files. Missing on scans made
+   * before the inventory existed, so readers must cope with `undefined`.
+   */
+  uses?: SkillUses;
 }
 
 /** Front matter limits from the agent skills spec are 64 / 1024 chars; allow some slack. */
@@ -72,13 +78,13 @@ export function parseFrontMatter(content: string): { name: string | null; descri
 
 /** One entry per SKILL.md among the fetched files, root first, then by path. */
 export function collectSkillInfo(files: SkillFile[]): SkillInfo[] {
+  const uses = new Map(inventory(files).map((i) => [i.root, i.uses]));
   return files
     .filter((f) => f.path === "SKILL.md" || f.path.endsWith("/SKILL.md"))
-    .map((f) => ({
-      root: f.path === "SKILL.md" ? "" : f.path.slice(0, -"/SKILL.md".length),
-      ...parseFrontMatter(f.content),
-      summary: null,
-    }))
+    .map((f) => {
+      const root = f.path === "SKILL.md" ? "" : f.path.slice(0, -"/SKILL.md".length);
+      return { root, ...parseFrontMatter(f.content), summary: null, uses: uses.get(root) };
+    })
     .sort((a, b) => a.root.localeCompare(b.root));
 }
 
